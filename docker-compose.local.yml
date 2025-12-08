@@ -1,0 +1,19 @@
+# Local development docker-compose
+# Usage: docker compose -f docker-compose.local.yml up --build
+
+services:
+  optionable:
+    container_name: optionable-local
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      - TZ=Europe/Warsaw
+      - NODE_ENV=production
+      - DATA_DIR=/data
+    volumes:
+      - ./data:/data
+    ports:
+      - "8080:8080"
+    restart: unless-stopped
+

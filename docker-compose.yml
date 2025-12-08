@@ -1,0 +1,24 @@
+services:
+  optionable:
+    container_name: optionable
+    image: yomikoye/optionable:latest
+    pull_policy: always
+    environment:
+      - TZ=Europe/Warsaw
+      - NODE_ENV=production
+      - DATA_DIR=/data
+    volumes:
+      - /mnt/shared/portainer/optionable:/data
+    networks:
+      - homelab-network
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.optionable.rule=Host(`optionable.koye.casa`)"
+      - "traefik.http.routers.optionable.tls=true"
+      - "traefik.http.services.optionable.loadbalancer.server.port=8080"
+    restart: unless-stopped
+
+networks:
+  homelab-network:
+    name: homelab-network
+    external: true
