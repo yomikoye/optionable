@@ -107,6 +107,7 @@ export default function App() {
         strike: '',
         type: 'CSP',
         quantity: 1,
+        delta: '',
         entryPrice: '',
         closePrice: '',
         status: 'Open',
@@ -164,6 +165,7 @@ export default function App() {
                 strike: trade.strike,
                 type: trade.type,
                 quantity: trade.quantity,
+                delta: trade.delta || '',
                 entryPrice: trade.entryPrice,
                 closePrice: trade.closePrice || '',
                 status: trade.status,
@@ -189,6 +191,7 @@ export default function App() {
             strike: trade.strike,
             type: trade.type,
             quantity: trade.quantity,
+            delta: '', // Clear so user enters new delta
             entryPrice: '', // Clear so user enters new premium
             closePrice: '',
             status: 'Open',
@@ -210,6 +213,7 @@ export default function App() {
             type: formData.type,
             strike: Number(formData.strike),
             quantity: Number(formData.quantity),
+            delta: formData.delta ? Number(formData.delta) : null,
             entryPrice: Number(formData.entryPrice),
             closePrice: formData.closePrice ? Number(formData.closePrice) : 0,
             openedDate: formData.openedDate,
@@ -482,6 +486,8 @@ export default function App() {
                                         <th className="px-3 py-3 font-semibold">Ticker</th>
                                         <th className="px-3 py-3 font-semibold">Type</th>
                                         <th className="px-3 py-3 font-semibold">Strike</th>
+                                        <th className="px-3 py-3 font-semibold text-center">Qty</th>
+                                        <th className="px-3 py-3 font-semibold text-center">Delta</th>
                                         <th className="px-3 py-3 font-semibold">Opened</th>
                                         <th className="px-3 py-3 font-semibold">Expiry</th>
                                         <th className="px-3 py-3 font-semibold text-center">DTE</th>
@@ -494,7 +500,7 @@ export default function App() {
                                 <tbody className="divide-y divide-slate-100">
                                     {trades.length === 0 ? (
                                         <tr>
-                                            <td colSpan="10" className="px-4 py-12 text-center text-slate-400">
+                                            <td colSpan="12" className="px-4 py-12 text-center text-slate-400">
                                                 No trades yet. Click "New Trade" to start your wheel.
                                             </td>
                                         </tr>
@@ -514,6 +520,10 @@ export default function App() {
                                                         </span>
                                                     </td>
                                                     <td className="px-3 py-3 font-mono text-slate-600">${trade.strike}</td>
+                                                    <td className="px-3 py-3 text-center font-mono text-slate-600">{trade.quantity}</td>
+                                                    <td className="px-3 py-3 text-center font-mono text-slate-500">
+                                                        {trade.delta ? trade.delta.toFixed(2) : '—'}
+                                                    </td>
                                                     <td className="px-3 py-3 text-xs text-slate-500">
                                                         {formatDateShort(trade.openedDate)}
                                                     </td>
@@ -733,7 +743,7 @@ export default function App() {
                                 </div>
                             </div>
 
-                            <div className="grid grid-cols-3 gap-4">
+                            <div className="grid grid-cols-4 gap-4">
                                 <div className="col-span-1">
                                     <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Type</label>
                                     <select name="type" value={formData.type} onChange={handleInputChange} className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white">
@@ -748,6 +758,10 @@ export default function App() {
                                 <div className="col-span-1">
                                     <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Qty</label>
                                     <input type="number" name="quantity" required value={formData.quantity} onChange={handleInputChange} className="w-full px-3 py-2 border border-slate-300 rounded-lg" />
+                                </div>
+                                <div className="col-span-1">
+                                    <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Delta</label>
+                                    <input type="number" step="0.01" min="0" max="1" name="delta" value={formData.delta} onChange={handleInputChange} className="w-full px-3 py-2 border border-slate-300 rounded-lg" placeholder="0.30" />
                                 </div>
                             </div>
 

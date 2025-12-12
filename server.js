@@ -29,6 +29,7 @@ db.exec(`
     type TEXT NOT NULL CHECK(type IN ('CSP', 'CC')),
     strike REAL NOT NULL,
     quantity INTEGER NOT NULL DEFAULT 1,
+    delta REAL,
     entryPrice REAL NOT NULL,
     closePrice REAL DEFAULT 0,
     openedDate TEXT NOT NULL,
@@ -39,6 +40,13 @@ db.exec(`
     updatedAt TEXT DEFAULT CURRENT_TIMESTAMP
   )
 `);
+
+// Add delta column if it doesn't exist (for existing databases)
+try {
+    db.exec(`ALTER TABLE trades ADD COLUMN delta REAL`);
+} catch (e) {
+    // Column already exists, ignore
+}
 
 // Middleware
 app.use(cors());
@@ -84,6 +92,7 @@ app.post('/api/trades', (req, res) => {
             type,
             strike,
             quantity,
+            delta,
             entryPrice,
             closePrice,
             openedDate,
@@ -93,8 +102,8 @@ app.post('/api/trades', (req, res) => {
         } = req.body;
 
         const stmt = db.prepare(`
-      INSERT INTO trades (ticker, type, strike, quantity, entryPrice, closePrice, openedDate, expirationDate, closedDate, status)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO trades (ticker, type, strike, quantity, delta, entryPrice, closePrice, openedDate, expirationDate, closedDate, status)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
         const result = stmt.run(
@@ -102,6 +111,7 @@ app.post('/api/trades', (req, res) => {
             type,
             strike,
             quantity || 1,
+            delta || null,
             entryPrice,
             closePrice || 0,
             openedDate,
@@ -126,6 +136,7 @@ app.put('/api/trades/:id', (req, res) => {
             type,
             strike,
             quantity,
+            delta,
             entryPrice,
             closePrice,
             openedDate,
@@ -136,7 +147,7 @@ app.put('/api/trades/:id', (req, res) => {
 
         const stmt = db.prepare(`
       UPDATE trades 
-      SET ticker = ?, type = ?, strike = ?, quantity = ?, entryPrice = ?, closePrice = ?, 
+      SET ticker = ?, type = ?, strike = ?, quantity = ?, delta = ?, entryPrice = ?, closePrice = ?, 
           openedDate = ?, expirationDate = ?, closedDate = ?, status = ?, updatedAt = CURRENT_TIMESTAMP
       WHERE id = ?
     `);
@@ -146,6 +157,7 @@ app.put('/api/trades/:id', (req, res) => {
             type,
             strike,
             quantity || 1,
+            delta || null,
             entryPrice,
             closePrice || 0,
             openedDate,
