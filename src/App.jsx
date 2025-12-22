@@ -9,7 +9,11 @@ import {
     TrendingUp,
     Copy,
     ChevronLeft,
-    ChevronRight
+    ChevronRight,
+    RefreshCw,
+    Link2,
+    Download,
+    Upload
 } from 'lucide-react';
 import {
     AreaChart,
@@ -111,8 +115,12 @@ export default function App() {
         entryPrice: '',
         closePrice: '',
         status: 'Open',
+        parentTradeId: null,
     };
     const [formData, setFormData] = useState(initialFormState);
+    const [isRolling, setIsRolling] = useState(false);
+    const [rollFromTrade, setRollFromTrade] = useState(null);
+    const [rollClosePrice, setRollClosePrice] = useState('');
 
     // --- Data Fetching ---
     const fetchTrades = async () => {
@@ -155,6 +163,8 @@ export default function App() {
     };
 
     const openModal = (trade = null) => {
+        setIsRolling(false);
+        setRollFromTrade(null);
         if (trade) {
             setEditingId(trade.id);
             setFormData({
@@ -169,6 +179,7 @@ export default function App() {
                 entryPrice: trade.entryPrice,
                 closePrice: trade.closePrice || '',
                 status: trade.status,
+                parentTradeId: trade.parentTradeId || null,
             });
         } else {
             setEditingId(null);
@@ -183,6 +194,8 @@ export default function App() {
     // Duplicate trade - opens modal with trade data but no editingId (creates new)
     const duplicateTrade = (trade) => {
         setEditingId(null); // Important: null means create new
+        setIsRolling(false);
+        setRollFromTrade(null);
         setFormData({
             ticker: trade.ticker,
             openedDate: new Date().toISOString().split('T')[0], // Today's date
@@ -195,6 +208,30 @@ export default function App() {
             entryPrice: '', // Clear so user enters new premium
             closePrice: '',
             status: 'Open',
+            parentTradeId: null,
+        });
+        setIsModalOpen(true);
+    };
+
+    // Roll trade - closes original at a cost and opens new position linked to it
+    const rollTrade = (trade) => {
+        setEditingId(null);
+        setIsRolling(true);
+        setRollFromTrade(trade);
+        setRollClosePrice('');
+        setFormData({
+            ticker: trade.ticker,
+            openedDate: new Date().toISOString().split('T')[0],
+            expirationDate: '',
+            closedDate: '',
+            strike: '',
+            type: trade.type,
+            quantity: trade.quantity,
+            delta: '',
+            entryPrice: '',
+            closePrice: '',
+            status: 'Open',
+            parentTradeId: trade.id,
         });
         setIsModalOpen(true);
     };
@@ -203,10 +240,33 @@ export default function App() {
         setIsModalOpen(false);
         setFormData(initialFormState);
         setEditingId(null);
+        setIsRolling(false);
+        setRollFromTrade(null);
+        setRollClosePrice('');
     };
 
     const saveTrade = async (e) => {
         e.preventDefault();
+
+        // Validation for rolling
+        if (isRolling && rollFromTrade) {
+            if (!rollClosePrice && rollClosePrice !== 0) {
+                setError('Please enter the close cost for the original position');
+                return;
+            }
+            if (!formData.strike) {
+                setError('Please enter the new strike price');
+                return;
+            }
+            if (!formData.entryPrice) {
+                setError('Please enter the new premium');
+                return;
+            }
+            if (!formData.expirationDate) {
+                setError('Please enter the new expiration date');
+                return;
+            }
+        }
 
         const tradeData = {
             ticker: formData.ticker,
@@ -220,9 +280,26 @@ export default function App() {
             expirationDate: formData.expirationDate,
             closedDate: formData.closedDate || null,
             status: formData.status,
+            parentTradeId: formData.parentTradeId || null,
         };
 
         try {
+            // If rolling, first update the original trade to 'Rolled' status
+            if (isRolling && rollFromTrade) {
+                const updateOriginal = await fetch(`${API_URL}/trades/${rollFromTrade.id}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        ...rollFromTrade,
+                        closePrice: Number(rollClosePrice),
+                        closedDate: formData.openedDate,
+                        status: 'Rolled',
+                    }),
+                });
+
+                if (!updateOriginal.ok) throw new Error('Failed to update original trade');
+            }
+
             const url = editingId ? `${API_URL}/trades/${editingId}` : `${API_URL}/trades`;
             const method = editingId ? 'PUT' : 'POST';
 
@@ -257,27 +334,129 @@ export default function App() {
         }
     };
 
+    // --- CSV Export ---
+    const exportToCSV = () => {
+        if (trades.length === 0) {
+            setError('No trades to export');
+            return;
+        }
+
+        const headers = ['id', 'ticker', 'type', 'strike', 'quantity', 'delta', 'entryPrice', 'closePrice', 'openedDate', 'expirationDate', 'closedDate', 'status', 'parentTradeId'];
+
+        const csvContent = [
+            headers.join(','),
+            ...trades.map(trade =>
+                headers.map(header => {
+                    const value = trade[header];
+                    if (value === null || value === undefined) return '';
+                    if (typeof value === 'string' && value.includes(',')) return `"${value}"`;
+                    return value;
+                }).join(',')
+            )
+        ].join('\n');
+
+        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+        const link = document.createElement('a');
+        const url = URL.createObjectURL(blob);
+        link.setAttribute('href', url);
+        link.setAttribute('download', `optionable_trades_${new Date().toISOString().split('T')[0]}.csv`);
+        link.style.visibility = 'hidden';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+    };
+
+    // --- CSV Import ---
+    const importFromCSV = async (event) => {
+        const file = event.target.files?.[0];
+        if (!file) return;
+
+        try {
+            const text = await file.text();
+            const lines = text.split('\n').filter(line => line.trim());
+
+            if (lines.length < 2) {
+                setError('CSV file is empty or invalid');
+                return;
+            }
+
+            const headers = lines[0].split(',').map(h => h.trim());
+            const requiredHeaders = ['ticker', 'type', 'strike', 'entryPrice', 'openedDate', 'expirationDate', 'status'];
+            const missingHeaders = requiredHeaders.filter(h => !headers.includes(h));
+
+            if (missingHeaders.length > 0) {
+                setError(`Missing required columns: ${missingHeaders.join(', ')}`);
+                return;
+            }
+
+            const tradesToImport = [];
+            for (let i = 1; i < lines.length; i++) {
+                const values = lines[i].split(',').map(v => v.trim().replace(/^"|"$/g, ''));
+                const trade = {};
+                headers.forEach((header, index) => {
+                    trade[header] = values[index] || null;
+                });
+
+                // Validate and convert types
+                tradesToImport.push({
+                    ticker: trade.ticker,
+                    type: trade.type,
+                    strike: Number(trade.strike) || 0,
+                    quantity: Number(trade.quantity) || 1,
+                    delta: trade.delta ? Number(trade.delta) : null,
+                    entryPrice: Number(trade.entryPrice) || 0,
+                    closePrice: Number(trade.closePrice) || 0,
+                    openedDate: trade.openedDate,
+                    expirationDate: trade.expirationDate,
+                    closedDate: trade.closedDate || null,
+                    status: trade.status || 'Open',
+                    parentTradeId: trade.parentTradeId ? Number(trade.parentTradeId) : null,
+                });
+            }
+
+            // Import trades via API
+            const response = await fetch(`${API_URL}/trades/import`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ trades: tradesToImport }),
+            });
+
+            if (!response.ok) throw new Error('Failed to import trades');
+
+            const result = await response.json();
+            await fetchTrades();
+            alert(`Successfully imported ${result.imported} trades!`);
+        } catch (err) {
+            console.error('Error importing CSV:', err);
+            setError('Failed to import CSV. Please check the file format.');
+        }
+
+        // Reset file input
+        event.target.value = '';
+    };
+
     // --- Aggregation Logic ---
     const stats = useMemo(() => {
-        // Completed trades = not Open (includes Expired, Assigned, Closed)
-        const completedTrades = trades.filter(t => t.status !== 'Open');
+        // Completed trades = not Open and not Rolled (terminal states only)
+        const completedTrades = trades.filter(t => t.status !== 'Open' && t.status !== 'Rolled');
         const openTrades = trades.filter(t => t.status === 'Open');
 
-        // P/L only for completed trades
-        const totalPnL = completedTrades.reduce((acc, t) => acc + calculateMetrics(t).pnl, 0);
+        // P/L for all non-open trades (includes Rolled for accurate total)
+        const allClosedTrades = trades.filter(t => t.status !== 'Open');
+        const totalPnL = allClosedTrades.reduce((acc, t) => acc + calculateMetrics(t).pnl, 0);
 
-        // Ticker stats (completed trades only)
+        // Ticker stats (all closed trades)
         const tickerStats = {};
-        completedTrades.forEach(t => {
+        allClosedTrades.forEach(t => {
             const { pnl } = calculateMetrics(t);
             const ticker = t.ticker.toUpperCase();
             if (!tickerStats[ticker]) tickerStats[ticker] = 0;
             tickerStats[ticker] += pnl;
         });
 
-        // Monthly stats (completed trades only)
+        // Monthly stats (all closed trades)
         const monthlyStats = {};
-        completedTrades.forEach(t => {
+        allClosedTrades.forEach(t => {
             const { pnl } = calculateMetrics(t);
             const date = new Date(t.openedDate);
             const monthKey = date.toLocaleString('default', { month: 'short', year: 'numeric' });
@@ -285,11 +464,39 @@ export default function App() {
             monthlyStats[monthKey] += pnl;
         });
 
-        // Win rate for completed trades
-        const winningTrades = completedTrades.filter(t => calculateMetrics(t).pnl > 0).length;
-        const winRate = completedTrades.length > 0 ? (winningTrades / completedTrades.length) * 100 : 0;
+        // Chain-based win rate calculation
+        // Find chain roots (trades with no parent)
+        const chainRoots = trades.filter(t => !t.parentTradeId);
 
-        // Average ROI for completed trades
+        // Calculate chain P/L for each root
+        const chains = chainRoots.map(root => {
+            let chainPnL = calculateMetrics(root).pnl;
+            let finalStatus = root.status;
+            let currentId = root.id;
+
+            // Follow the chain forward (find children)
+            let child = trades.find(t => t.parentTradeId === currentId);
+            while (child) {
+                chainPnL += calculateMetrics(child).pnl;
+                finalStatus = child.status;
+                currentId = child.id;
+                child = trades.find(t => t.parentTradeId === currentId);
+            }
+
+            return {
+                rootId: root.id,
+                chainPnL,
+                finalStatus,
+                isResolved: finalStatus !== 'Open' && finalStatus !== 'Rolled'
+            };
+        });
+
+        // Only count resolved chains for win rate
+        const resolvedChains = chains.filter(c => c.isResolved);
+        const winningChains = resolvedChains.filter(c => c.chainPnL > 0).length;
+        const winRate = resolvedChains.length > 0 ? (winningChains / resolvedChains.length) * 100 : 0;
+
+        // Average ROI for completed trades (terminal states only)
         const avgRoi = completedTrades.length > 0
             ? completedTrades.reduce((acc, t) => acc + calculateMetrics(t).roi, 0) / completedTrades.length
             : 0;
@@ -297,22 +504,59 @@ export default function App() {
         // Capital deployed (collateral for open trades)
         const capitalAtRisk = openTrades.reduce((acc, t) => acc + calculateMetrics(t).collateral, 0);
 
-        return { totalPnL, tickerStats, monthlyStats, winRate, avgRoi, capitalAtRisk, openTradesCount: openTrades.length, completedTradesCount: completedTrades.length };
+        // Count rolled trades
+        const rolledCount = trades.filter(t => t.status === 'Rolled').length;
+
+        return {
+            totalPnL,
+            tickerStats,
+            monthlyStats,
+            winRate,
+            avgRoi,
+            capitalAtRisk,
+            openTradesCount: openTrades.length,
+            completedTradesCount: completedTrades.length,
+            resolvedChains: resolvedChains.length,
+            rolledCount
+        };
     }, [trades]);
 
-    // --- Chart Data ---
-    const chartData = useMemo(() => {
-        if (trades.length === 0) return [];
+    // Build a map of trade chains for visual indicators
+    const chainInfo = useMemo(() => {
+        const parentToChild = new Map();
+        const childToParent = new Map();
 
-        const sortedTrades = [...trades].sort((a, b) => new Date(a.openedDate) - new Date(b.openedDate));
+        trades.forEach(t => {
+            if (t.parentTradeId) {
+                parentToChild.set(t.parentTradeId, t.id);
+                childToParent.set(t.id, t.parentTradeId);
+            }
+        });
+
+        return { parentToChild, childToParent };
+    }, [trades]);
+
+    // --- Chart Data (only completed trades) ---
+    const chartData = useMemo(() => {
+        // Only include trades that are not Open (completed or rolled)
+        const completedTrades = trades.filter(t => t.status !== 'Open');
+        if (completedTrades.length === 0) return [];
+
+        const sortedTrades = [...completedTrades].sort((a, b) => {
+            // Sort by closed date if available, otherwise by opened date
+            const dateA = a.closedDate || a.expirationDate || a.openedDate;
+            const dateB = b.closedDate || b.expirationDate || b.openedDate;
+            return new Date(dateA) - new Date(dateB);
+        });
 
         let cumulativePnL = 0;
         const data = sortedTrades.map(trade => {
             const { pnl } = calculateMetrics(trade);
             cumulativePnL += pnl;
+            const chartDate = trade.closedDate || trade.expirationDate || trade.openedDate;
             return {
-                date: new Date(trade.openedDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-                fullDate: trade.openedDate,
+                date: new Date(chartDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+                fullDate: chartDate,
                 pnl: cumulativePnL,
                 tradePnl: pnl,
                 ticker: trade.ticker.toUpperCase()
@@ -372,13 +616,38 @@ export default function App() {
                         </h1>
                         <p className="text-slate-500 text-sm mt-1">Documenting the Wheel Strategy</p>
                     </div>
-                    <button
-                        onClick={() => openModal()}
-                        className="mt-4 md:mt-0 flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg font-medium transition-colors shadow-md shadow-indigo-200"
-                    >
-                        <Plus className="w-4 h-4" />
-                        New Trade
-                    </button>
+                    <div className="mt-4 md:mt-0 flex items-center gap-2">
+                        {/* Export Button */}
+                        <button
+                            onClick={exportToCSV}
+                            className="flex items-center gap-2 bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-2 rounded-lg font-medium transition-colors"
+                            title="Export to CSV"
+                        >
+                            <Download className="w-4 h-4" />
+                            <span className="hidden sm:inline">Export</span>
+                        </button>
+
+                        {/* Import Button */}
+                        <label className="flex items-center gap-2 bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-2 rounded-lg font-medium transition-colors cursor-pointer" title="Import from CSV">
+                            <Upload className="w-4 h-4" />
+                            <span className="hidden sm:inline">Import</span>
+                            <input
+                                type="file"
+                                accept=".csv"
+                                onChange={importFromCSV}
+                                className="hidden"
+                            />
+                        </label>
+
+                        {/* New Trade Button */}
+                        <button
+                            onClick={() => openModal()}
+                            className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg font-medium transition-colors shadow-md shadow-indigo-200"
+                        >
+                            <Plus className="w-4 h-4" />
+                            New Trade
+                        </button>
+                    </div>
                 </header>
 
                 {/* Dashboard Grid */}
@@ -396,7 +665,10 @@ export default function App() {
                         <div className="text-3xl font-bold mt-2 text-indigo-600">
                             {formatPercent(stats.winRate)}
                         </div>
-                        <div className="text-xs text-slate-400 mt-1">For completed trades</div>
+                        <div className="text-xs text-slate-400 mt-1">
+                            {stats.resolvedChains} resolved chain{stats.resolvedChains !== 1 ? 's' : ''}
+                            {stats.rolledCount > 0 && ` (${stats.rolledCount} rolled)`}
+                        </div>
                     </div>
 
                     <div className="bg-white p-5 rounded-xl shadow-sm border border-slate-200 flex flex-col justify-between">
@@ -508,9 +780,22 @@ export default function App() {
                                         paginatedTrades.map((trade) => {
                                             const metrics = calculateMetrics(trade);
                                             const dte = calculateDTE(trade.expirationDate, trade.status);
+                                            const hasChild = chainInfo.parentToChild.has(trade.id);
+                                            const hasParent = chainInfo.childToParent.has(trade.id);
+                                            const isPartOfChain = hasChild || hasParent;
                                             return (
                                                 <tr key={trade.id} className="hover:bg-slate-50/80 transition-colors group">
-                                                    <td className="px-3 py-3 font-bold text-slate-700">{trade.ticker.toUpperCase()}</td>
+                                                    <td className="px-3 py-3 font-bold text-slate-700">
+                                                        <div className="flex items-center gap-1">
+                                                            {trade.ticker.toUpperCase()}
+                                                            {isPartOfChain && (
+                                                                <Link2
+                                                                    className="w-3 h-3 text-amber-500"
+                                                                    title={hasParent ? "Rolled from previous" : "Rolled to next"}
+                                                                />
+                                                            )}
+                                                        </div>
+                                                    </td>
                                                     <td className="px-3 py-3">
                                                         <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${trade.type === 'CSP'
                                                             ? 'bg-blue-100 text-blue-700'
@@ -552,13 +837,23 @@ export default function App() {
                                                         <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${trade.status === 'Open' ? 'bg-yellow-100 text-yellow-700' :
                                                             trade.status === 'Assigned' ? 'bg-orange-100 text-orange-700' :
                                                                 trade.status === 'Expired' ? 'bg-green-100 text-green-700' :
-                                                                    'bg-slate-100 text-slate-600'
+                                                                    trade.status === 'Rolled' ? 'bg-cyan-100 text-cyan-700' :
+                                                                        'bg-slate-100 text-slate-600'
                                                             }`}>
                                                             {trade.status}
                                                         </span>
                                                     </td>
                                                     <td className="px-3 py-3 text-right">
                                                         <div className="flex justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                            {trade.status === 'Open' && (
+                                                                <button
+                                                                    onClick={() => rollTrade(trade)}
+                                                                    className="p-1 text-slate-400 hover:text-amber-600 hover:bg-amber-50 rounded"
+                                                                    title="Roll trade"
+                                                                >
+                                                                    <RefreshCw className="w-4 h-4" />
+                                                                </button>
+                                                            )}
                                                             <button
                                                                 onClick={() => duplicateTrade(trade)}
                                                                 className="p-1 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded"
@@ -704,18 +999,76 @@ export default function App() {
 
             {/* Modal */}
             {isModalOpen && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm">
-                    <div className="modal-enter bg-white rounded-2xl shadow-xl w-full max-w-lg overflow-hidden">
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm overflow-y-auto">
+                    <div className="modal-enter bg-white rounded-2xl shadow-xl w-full max-w-xl overflow-hidden my-8">
                         <div className="p-5 border-b border-slate-100 flex justify-between items-center bg-slate-50">
-                            <h2 className="text-lg font-bold text-slate-800">
-                                {editingId ? 'Edit Trade' : 'New Trade'}
-                            </h2>
+                            <div>
+                                <h2 className="text-lg font-bold text-slate-800">
+                                    {editingId ? 'Edit Trade' : isRolling ? 'Roll Trade' : 'New Trade'}
+                                </h2>
+                                {isRolling && rollFromTrade && (
+                                    <p className="text-xs text-amber-600 mt-1 flex items-center gap-1">
+                                        <RefreshCw className="w-3 h-3" />
+                                        Rolling {rollFromTrade.ticker} ${rollFromTrade.strike} {rollFromTrade.type}
+                                    </p>
+                                )}
+                            </div>
                             <button onClick={closeModal} className="text-slate-400 hover:text-slate-600">
                                 <X className="w-5 h-5" />
                             </button>
                         </div>
 
                         <form onSubmit={saveTrade} className="p-6 space-y-4">
+
+                            {/* Original Trade Close Section (only when rolling) */}
+                            {isRolling && rollFromTrade && (
+                                <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 space-y-3">
+                                    <h3 className="font-semibold text-amber-800 text-sm flex items-center gap-2">
+                                        <RefreshCw className="w-4 h-4" />
+                                        Close Original Position
+                                    </h3>
+                                    <div className="grid grid-cols-3 gap-3 text-sm">
+                                        <div>
+                                            <span className="text-amber-600 text-xs">Ticker</span>
+                                            <p className="font-bold text-amber-900">{rollFromTrade.ticker}</p>
+                                        </div>
+                                        <div>
+                                            <span className="text-amber-600 text-xs">Strike</span>
+                                            <p className="font-bold text-amber-900">${rollFromTrade.strike}</p>
+                                        </div>
+                                        <div>
+                                            <span className="text-amber-600 text-xs">Entry Premium</span>
+                                            <p className="font-bold text-emerald-600">${rollFromTrade.entryPrice}</p>
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs font-semibold text-amber-700 uppercase mb-1">
+                                            Close Cost (per share) *
+                                        </label>
+                                        <div className="relative">
+                                            <span className="absolute left-3 top-2 text-amber-400">$</span>
+                                            <input
+                                                type="number" step="0.01" required
+                                                value={rollClosePrice}
+                                                onChange={(e) => setRollClosePrice(e.target.value)}
+                                                className="w-full pl-7 pr-3 py-2 border border-amber-300 rounded-lg focus:ring-amber-500 bg-white"
+                                                placeholder="Cost to buy back original"
+                                            />
+                                        </div>
+                                        <div className="text-xs text-amber-600 mt-1">
+                                            Original P/L: {formatCurrency((rollFromTrade.entryPrice - (Number(rollClosePrice) || 0)) * rollFromTrade.quantity * 100)}
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* New Trade Section Header (only when rolling) */}
+                            {isRolling && (
+                                <div className="border-t border-slate-200 pt-4">
+                                    <h3 className="font-semibold text-indigo-700 text-sm mb-3">New Rolled Position</h3>
+                                </div>
+                            )}
+
                             <div className="grid grid-cols-1">
                                 <div>
                                     <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Ticker</label>
@@ -724,6 +1077,7 @@ export default function App() {
                                         value={formData.ticker} onChange={handleInputChange}
                                         className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 uppercase"
                                         placeholder="e.g. SOXL"
+                                        readOnly={isRolling}
                                     />
                                 </div>
                             </div>
@@ -734,7 +1088,7 @@ export default function App() {
                                     <input type="date" name="openedDate" required value={formData.openedDate} onChange={handleInputChange} className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm" />
                                 </div>
                                 <div>
-                                    <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Expiration</label>
+                                    <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Expiration *</label>
                                     <input type="date" name="expirationDate" required value={formData.expirationDate} onChange={handleInputChange} className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm" />
                                 </div>
                                 <div>
@@ -746,13 +1100,13 @@ export default function App() {
                             <div className="grid grid-cols-4 gap-4">
                                 <div className="col-span-1">
                                     <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Type</label>
-                                    <select name="type" value={formData.type} onChange={handleInputChange} className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white">
+                                    <select name="type" value={formData.type} onChange={handleInputChange} className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white" disabled={isRolling}>
                                         <option value="CSP">CSP (Put)</option>
                                         <option value="CC">CC (Call)</option>
                                     </select>
                                 </div>
                                 <div className="col-span-1">
-                                    <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Strike ($)</label>
+                                    <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">New Strike *</label>
                                     <input type="number" step="0.5" name="strike" required value={formData.strike} onChange={handleInputChange} className="w-full px-3 py-2 border border-slate-300 rounded-lg" placeholder="0.00" />
                                 </div>
                                 <div className="col-span-1">
@@ -767,7 +1121,9 @@ export default function App() {
 
                             <div className="grid grid-cols-2 gap-4 bg-slate-50 p-4 rounded-lg border border-slate-100">
                                 <div>
-                                    <label className="block text-xs font-semibold text-slate-500 uppercase mb-1 text-emerald-600">Entry Premium ($)</label>
+                                    <label className="block text-xs font-semibold text-slate-500 uppercase mb-1 text-emerald-600">
+                                        {isRolling ? 'New Premium *' : 'Entry Premium ($)'}
+                                    </label>
                                     <div className="relative">
                                         <span className="absolute left-3 top-2 text-slate-400">$</span>
                                         <input
@@ -782,43 +1138,63 @@ export default function App() {
                                     </div>
                                 </div>
 
-                                <div>
-                                    <label className="block text-xs font-semibold text-slate-500 uppercase mb-1 text-red-500">Close Cost ($)</label>
-                                    <div className="relative">
-                                        <span className="absolute left-3 top-2 text-slate-400">$</span>
-                                        <input
-                                            type="number" step="0.01" name="closePrice"
-                                            value={formData.closePrice} onChange={handleInputChange}
-                                            className="w-full pl-7 pr-3 py-2 border border-red-200 rounded-lg focus:ring-red-500"
-                                            placeholder="0.00 if open"
-                                        />
+                                {!isRolling && (
+                                    <div>
+                                        <label className="block text-xs font-semibold text-slate-500 uppercase mb-1 text-red-500">Close Cost ($)</label>
+                                        <div className="relative">
+                                            <span className="absolute left-3 top-2 text-slate-400">$</span>
+                                            <input
+                                                type="number" step="0.01" name="closePrice"
+                                                value={formData.closePrice} onChange={handleInputChange}
+                                                className="w-full pl-7 pr-3 py-2 border border-red-200 rounded-lg focus:ring-red-500"
+                                                placeholder="0.00 if open"
+                                            />
+                                        </div>
                                     </div>
-                                </div>
+                                )}
+
+                                {isRolling && (
+                                    <div className="flex flex-col justify-center">
+                                        <div className="text-xs text-slate-500 uppercase mb-1">Net Credit/Debit</div>
+                                        <div className={`text-xl font-bold ${((Number(formData.entryPrice) || 0) - (Number(rollClosePrice) || 0)) >= 0
+                                            ? 'text-emerald-600'
+                                            : 'text-red-600'
+                                            }`}>
+                                            {formatCurrency(((Number(formData.entryPrice) || 0) - (Number(rollClosePrice) || 0)) * (formData.quantity || 1) * 100)}
+                                        </div>
+                                        <div className="text-[10px] text-slate-400">
+                                            {((Number(formData.entryPrice) || 0) - (Number(rollClosePrice) || 0)) >= 0 ? 'Credit' : 'Debit'}
+                                        </div>
+                                    </div>
+                                )}
                             </div>
 
-                            <div>
-                                <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Status</label>
-                                <div className="grid grid-cols-4 gap-2">
-                                    {['Open', 'Expired', 'Assigned', 'Closed'].map((s) => (
-                                        <button
-                                            key={s}
-                                            type="button"
-                                            onClick={() => setFormData(prev => ({ ...prev, status: s }))}
-                                            className={`py-2 text-xs font-medium rounded-lg border ${formData.status === s
-                                                ? 'bg-indigo-600 text-white border-indigo-600'
-                                                : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
-                                                }`}
-                                        >
-                                            {s}
-                                        </button>
-                                    ))}
+                            {!isRolling && (
+                                <div>
+                                    <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Status</label>
+                                    <div className="grid grid-cols-4 gap-2">
+                                        {['Open', 'Expired', 'Assigned', 'Closed'].map((s) => (
+                                            <button
+                                                key={s}
+                                                type="button"
+                                                onClick={() => setFormData(prev => ({ ...prev, status: s }))}
+                                                className={`py-2 text-xs font-medium rounded-lg border ${formData.status === s
+                                                    ? 'bg-indigo-600 text-white border-indigo-600'
+                                                    : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                                                    }`}
+                                            >
+                                                {s}
+                                            </button>
+                                        ))}
+                                    </div>
+                                    <p className="text-[10px] text-slate-400 mt-1">Use the 🔄 Roll button to roll a trade</p>
                                 </div>
-                            </div>
+                            )}
 
                             <div className="pt-4 flex gap-3">
                                 <button type="button" onClick={closeModal} className="flex-1 px-4 py-2 border border-slate-300 rounded-lg text-slate-700 font-medium hover:bg-slate-50">Cancel</button>
                                 <button type="submit" className="flex-1 px-4 py-2 bg-indigo-600 rounded-lg text-white font-bold hover:bg-indigo-700 shadow-lg shadow-indigo-200">
-                                    {editingId ? 'Update Trade' : 'Save Trade'}
+                                    {editingId ? 'Update Trade' : isRolling ? 'Roll & Create New' : 'Save Trade'}
                                 </button>
                             </div>
 
