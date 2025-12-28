@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
     Plus,
     Trash2,
@@ -99,6 +99,11 @@ export default function App() {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
     const [importFormat, setImportFormat] = useState('auto'); // 'auto' | 'optionable' | 'activity'
+    const [importPreview, setImportPreview] = useState([]); // trades parsed and ready to preview
+    const [isImportPreviewOpen, setIsImportPreviewOpen] = useState(false);
+    const [importFileName, setImportFileName] = useState('');
+    const fileInputRef = useRef(null);
+
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [editingId, setEditingId] = useState(null);
     const [currentPage, setCurrentPage] = useState(1);
@@ -367,7 +372,7 @@ export default function App() {
         document.body.removeChild(link);
     };
 
-    // --- CSV helpers and format mapping ---
+    // --- CSV helpers ---
     const parseCSV = (text) => {
         const parseLine = (line) => {
             const values = [];
@@ -392,35 +397,31 @@ export default function App() {
             values.push(cur);
             return values.map(v => v.trim().replace(/^"|"$/g, ''));
         };
-
-        const lines = text.split(/\r?\n/).filter(l => l.trim() !== '');
-        if (lines.length === 0) return { headers: [], rows: [] };
-        const headers = parseLine(lines[0]).map(h => h.trim());
-        const rows = lines.slice(1).map(line => parseLine(line));
+        const lines = text.split(/\r?\n/);
+        const nonEmpty = lines.filter(l => l.trim() !== '');
+        if (nonEmpty.length === 0) return { headers: [], rows: [] };
+        const headers = parseLine(nonEmpty[0]).map(h => h.trim());
+        const rows = nonEmpty.slice(1).map(l => parseLine(l));
         return { headers, rows };
     };
 
     const normalizeKey = k => (k || '').replace(/\s+/g, '').toLowerCase();
-
     const cleanNumber = (s) => {
         if (s === undefined || s === null) return NaN;
         const str = String(s).trim();
         if (str === '') return NaN;
-        // Remove $ and commas
         let cleaned = str.replace(/\$/g, '').replace(/,/g, '');
-        // Handle parentheses for negatives
         const isParenNeg = /^\(.*\)$/.test(cleaned);
         cleaned = cleaned.replace(/^\(|\)$/g, '');
         const n = Number(cleaned);
         if (isNaN(n)) return NaN;
         return isParenNeg ? -Math.abs(n) : n;
     };
-
     const parseDateString = (s) => {
         if (!s) return null;
         const d = new Date(s);
         if (!isNaN(d)) return d.toISOString().split('T')[0];
-        const m = s.match(/(\d{1,2})\/\-\/\-/);
+        const m = s.match(/(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})/);
         if (m) {
             let yr = m[3].length === 2 ? `20${m[3]}` : m[3];
             const mm = String(Number(m[1])).padStart(2, '0');
@@ -429,22 +430,17 @@ export default function App() {
         }
         return null;
     };
-
     const normalizeDescription = (s) => (s || '').replace(/\$/g, '').replace(/,/g, '').replace(/\s+/g, ' ').trim().toLowerCase();
-
     const parseInstrument = (instr = '', desc = '') => {
         const s = `${instr || ''} ${desc || ''}`;
         const result = { ticker: null, strike: null, type: null, expirationDate: null };
-
         const tk = s.match(/\b([A-Z]{1,6})\b/i);
         if (tk) result.ticker = tk[1].toUpperCase();
-
         const typeMatch = s.match(/\b(PUT|CALL|P|C)\b/i);
         if (typeMatch) {
             const t = typeMatch[1].toLowerCase();
             result.type = t.startsWith('p') ? 'CSP' : 'CC';
         }
-
         const strikeMatch = s.match(/(?:\$)?(\d{1,5}(?:\.\d+)?)(?![\/\d])/g);
         if (strikeMatch && strikeMatch.length) {
             for (let i = strikeMatch.length - 1; i >= 0; i--) {
@@ -455,25 +451,23 @@ export default function App() {
                 }
             }
         }
-
         const dateRegex = /(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4})|(\d{4}[\/\-]\d{1,2}[\/\-]\d{1,2})/;
         const dateMatch = s.match(dateRegex);
         if (dateMatch) result.expirationDate = parseDateString(dateMatch[0]);
-
         return result;
     };
 
-    // --- CSV Import ---
+    // --- CSV Import with preview (activity or optionable) ---
     const importFromCSV = async (event) => {
         const file = event.target.files?.[0];
         if (!file) return;
-
+        setImportFileName(file.name);
         try {
             const text = await file.text();
             const { headers, rows } = parseCSV(text);
-
             if (headers.length === 0 || rows.length === 0) {
                 setError('CSV file is empty or invalid');
+                if (fileInputRef.current) fileInputRef.current.value = '';
                 return;
             }
 
@@ -481,20 +475,10 @@ export default function App() {
             const looksLikeActivity = norm.includes('activitydate') || norm.includes('instrument') || norm.includes('transcode');
             const format = importFormat === 'auto' ? (looksLikeActivity ? 'activity' : 'optionable') : importFormat;
 
-            // Optionable standard check
-            const requiredHeaders = ['ticker', 'type', 'strike', 'entryPrice', 'openedDate', 'expirationDate', 'status'];
-            if (format === 'optionable') {
-                const missingHeaders = requiredHeaders.filter(h => !norm.includes(h.toLowerCase()));
-                if (missingHeaders.length > 0) {
-                    setError(`Missing required columns: ${missingHeaders.join(', ')}`);
-                    return;
-                }
-            }
-
             const tradesToImport = [];
 
             if (format === 'activity') {
-                // Build normalized activities
+                // Build normalized activity rows
                 const activities = rows.map(vals => {
                     const rowObj = {};
                     headers.forEach((h, idx) => rowObj[normalizeKey(h)] = vals[idx] || '');
@@ -509,7 +493,6 @@ export default function App() {
                     const computedPrice = !isNaN(priceNum) && priceNum !== 0
                         ? priceNum
                         : (!isNaN(amountNum) && qty !== 0 ? Math.abs(amountNum) / (qty * 100) : 0);
-
                     return {
                         rowObj,
                         parsed,
@@ -522,7 +505,7 @@ export default function App() {
                     };
                 });
 
-                // Create STO (sell-to-open) trades for rows that look like STO and include 'put' in the description
+                // Create STO trades for Put STO rows
                 const stoTrades = [];
                 activities.forEach((act, idx) => {
                     if (act.transCode === 'STO' && act.descNorm.includes('put')) {
@@ -530,22 +513,20 @@ export default function App() {
                             _activityIndex: idx,
                             ticker: act.parsed.ticker,
                             type: act.parsed.type || 'CSP',
-                            strike: act.parsed.strike || 0,
+                            strike: act.parsed.strike || null,
                             quantity: act.qty || 1,
-                            delta: null,
                             entryPrice: act.computedPrice || 0,
-                            closePrice: 0,
                             openedDate: act.activityDate || new Date().toISOString().split('T')[0],
-                            expirationDate: act.parsed.expirationDate || '',
+                            expirationDate: act.parsed.expirationDate || null,
                             closedDate: null,
+                            closePrice: 0,
                             status: 'Open',
-                            description: act.description,
                             descNorm: act.descNorm
                         });
                     }
                 });
 
-                // Match STO -> BTC (same normalized description, BTC on/after STO)
+                // Match STO -> BTC with stricter rules: require matching strike & expiry when both available
                 const usedBtc = new Set();
                 stoTrades.forEach((sto) => {
                     const act = activities[sto._activityIndex];
@@ -556,8 +537,11 @@ export default function App() {
                         const cand = activities[i];
                         if (cand.transCode !== 'BTC') continue;
                         if (cand.descNorm !== act.descNorm) continue;
-                        if (sto.ticker && cand.parsed.ticker && sto.ticker !== cand.parsed.ticker) continue;
-                        // require BTC activity date >= STO activity date (if both present)
+                        // If both have strikes, they must match
+                        if (sto.strike !== null && cand.parsed.strike !== null && sto.strike !== cand.parsed.strike) continue;
+                        // If both have expiration dates, they must match
+                        if (sto.expirationDate && cand.parsed.expirationDate && sto.expirationDate !== cand.parsed.expirationDate) continue;
+                        // BTC activity date must be >= STO activity date (if present)
                         if (cand.activityDate && act.activityDate && new Date(cand.activityDate) < new Date(act.activityDate)) continue;
                         matched = { idx: i, cand };
                         break;
@@ -570,21 +554,18 @@ export default function App() {
                     }
                 });
 
-                // Finalize trades to import
+                // Finalize trades for preview
                 stoTrades.forEach(t => {
-                    delete t._activityIndex;
-                    delete t.descNorm;
-                    delete t.description;
                     tradesToImport.push({
                         ticker: t.ticker,
                         type: t.type,
                         strike: Number(t.strike) || 0,
                         quantity: Number(t.quantity) || 1,
-                        delta: t.delta,
+                        delta: null,
                         entryPrice: Number(t.entryPrice) || 0,
                         closePrice: Number(t.closePrice) || 0,
                         openedDate: t.openedDate,
-                        expirationDate: t.expirationDate,
+                        expirationDate: t.expirationDate || '',
                         closedDate: t.closedDate || null,
                         status: t.status || 'Open',
                         parentTradeId: null,
@@ -592,7 +573,7 @@ export default function App() {
                 });
 
             } else {
-                // Legacy optionable CSV
+                // Legacy optionable CSV mapping
                 for (const vals of rows) {
                     const rowObj = {};
                     headers.forEach((h, idx) => rowObj[normalizeKey(h)] = vals[idx] || '');
@@ -613,157 +594,77 @@ export default function App() {
                 }
             }
 
-            // Import trades via API
+            // Set preview and open modal (do not upload yet)
+            setImportPreview(tradesToImport);
+            setIsImportPreviewOpen(true);
+        } catch (err) {
+            console.error('Error importing CSV:', err);
+            setError('Failed to parse CSV. Please check the file format.');
+            if (fileInputRef.current) fileInputRef.current.value = '';
+        }
+    };
+
+    const confirmImport = async () => {
+        if (!importPreview.length) {
+            setError('Nothing to import');
+            return;
+        }
+        try {
             const response = await fetch(`${API_URL}/trades/import`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ trades: tradesToImport }),
+                body: JSON.stringify({ trades: importPreview }),
             });
-
             if (!response.ok) throw new Error('Failed to import trades');
-
             const result = await response.json();
             await fetchTrades();
+            setIsImportPreviewOpen(false);
+            setImportPreview([]);
+            if (fileInputRef.current) fileInputRef.current.value = '';
             alert(`Successfully imported ${result.imported} trades!`);
         } catch (err) {
-            console.error('Error importing CSV:', err);
-            setError('Failed to import CSV. Please check the file format.');
+            console.error('Error importing trades:', err);
+            setError('Failed to upload trades. Please try again.');
         }
-
-        // Reset file input
-        event.target.value = '';
     };
 
-    // --- Aggregation Logic ---
-    const stats = useMemo(() => {
-        // Completed trades = not Open and not Rolled (terminal states only)
-        const completedTrades = trades.filter(t => t.status !== 'Open' && t.status !== 'Rolled');
-        const openTrades = trades.filter(t => t.status === 'Open');
+    const cancelImportPreview = () => {
+        setIsImportPreviewOpen(false);
+        setImportPreview([]);
+        if (fileInputRef.current) fileInputRef.current.value = '';
+    };
 
-        // P/L for all non-open trades (includes Rolled for accurate total)
-        const allClosedTrades = trades.filter(t => t.status !== 'Open');
-        const totalPnL = allClosedTrades.reduce((acc, t) => acc + calculateMetrics(t).pnl, 0);
+    // --- CSV Export ---
+    const exportToCSV = () => {
+        if (trades.length === 0) {
+            setError('No trades to export');
+            return;
+        }
 
-        // Ticker stats (all closed trades)
-        const tickerStats = {};
-        allClosedTrades.forEach(t => {
-            const { pnl } = calculateMetrics(t);
-            const ticker = t.ticker.toUpperCase();
-            if (!tickerStats[ticker]) tickerStats[ticker] = 0;
-            tickerStats[ticker] += pnl;
-        });
+        const headers = ['id', 'ticker', 'type', 'strike', 'quantity', 'delta', 'entryPrice', 'closePrice', 'openedDate', 'expirationDate', 'closedDate', 'status', 'parentTradeId'];
 
-        // Monthly stats (all closed trades)
-        const monthlyStats = {};
-        allClosedTrades.forEach(t => {
-            const { pnl } = calculateMetrics(t);
-            const date = new Date(t.openedDate);
-            const monthKey = date.toLocaleString('default', { month: 'short', year: 'numeric' });
-            if (!monthlyStats[monthKey]) monthlyStats[monthKey] = 0;
-            monthlyStats[monthKey] += pnl;
-        });
+        const csvContent = [
+            headers.join(','),
+            ...trades.map(trade =>
+                headers.map(header => {
+                    const value = trade[header];
+                    if (value === null || value === undefined) return '';
+                    if (typeof value === 'string' && value.includes(',')) return `"${value}"`;
+                    return value;
+                }).join(',')
+            )
+        ].join('\n');
 
-        // Chain-based win rate calculation
-        // Find chain roots (trades with no parent)
-        const chainRoots = trades.filter(t => !t.parentTradeId);
-
-        // Calculate chain P/L for each root
-        const chains = chainRoots.map(root => {
-            let chainPnL = calculateMetrics(root).pnl;
-            let finalStatus = root.status;
-            let currentId = root.id;
-
-            // Follow the chain forward (find children)
-            let child = trades.find(t => t.parentTradeId === currentId);
-            while (child) {
-                chainPnL += calculateMetrics(child).pnl;
-                finalStatus = child.status;
-                currentId = child.id;
-                child = trades.find(t => t.parentTradeId === currentId);
-            }
-
-            return {
-                rootId: root.id,
-                chainPnL,
-                finalStatus,
-                isResolved: finalStatus !== 'Open' && finalStatus !== 'Rolled'
-            };
-        });
-
-        // Only count resolved chains for win rate
-        const resolvedChains = chains.filter(c => c.isResolved);
-        const winningChains = resolvedChains.filter(c => c.chainPnL > 0).length;
-        const winRate = resolvedChains.length > 0 ? (winningChains / resolvedChains.length) * 100 : 0;
-
-        // Average ROI for completed trades (terminal states only)
-        const avgRoi = completedTrades.length > 0
-            ? completedTrades.reduce((acc, t) => acc + calculateMetrics(t).roi, 0) / completedTrades.length
-            : 0;
-
-        // Capital deployed (collateral for open trades)
-        const capitalAtRisk = openTrades.reduce((acc, t) => acc + calculateMetrics(t).collateral, 0);
-
-        // Count rolled trades
-        const rolledCount = trades.filter(t => t.status === 'Rolled').length;
-
-        return {
-            totalPnL,
-            tickerStats,
-            monthlyStats,
-            winRate,
-            avgRoi,
-            capitalAtRisk,
-            openTradesCount: openTrades.length,
-            completedTradesCount: completedTrades.length,
-            resolvedChains: resolvedChains.length,
-            rolledCount
-        };
-    }, [trades]);
-
-    // Build a map of trade chains for visual indicators
-    const chainInfo = useMemo(() => {
-        const parentToChild = new Map();
-        const childToParent = new Map();
-
-        trades.forEach(t => {
-            if (t.parentTradeId) {
-                parentToChild.set(t.parentTradeId, t.id);
-                childToParent.set(t.id, t.parentTradeId);
-            }
-        });
-
-        return { parentToChild, childToParent };
-    }, [trades]);
-
-    // --- Chart Data (only completed trades) ---
-    const chartData = useMemo(() => {
-        // Only include trades that are not Open (completed or rolled)
-        const completedTrades = trades.filter(t => t.status !== 'Open');
-        if (completedTrades.length === 0) return [];
-
-        const sortedTrades = [...completedTrades].sort((a, b) => {
-            // Sort by closed date if available, otherwise by opened date
-            const dateA = a.closedDate || a.expirationDate || a.openedDate;
-            const dateB = b.closedDate || b.expirationDate || b.openedDate;
-            return new Date(dateA) - new Date(dateB);
-        });
-
-        let cumulativePnL = 0;
-        const data = sortedTrades.map(trade => {
-            const { pnl } = calculateMetrics(trade);
-            cumulativePnL += pnl;
-            const chartDate = trade.closedDate || trade.expirationDate || trade.openedDate;
-            return {
-                date: new Date(chartDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-                fullDate: chartDate,
-                pnl: cumulativePnL,
-                tradePnl: pnl,
-                ticker: trade.ticker.toUpperCase()
-            };
-        });
-
-        return data;
-    }, [trades]);
+        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+        const link = document.createElement('a');
+        const url = URL.createObjectURL(blob);
+        link.setAttribute('href', url);
+        link.setAttribute('download', `optionable_trades_${new Date().toISOString().split('T')[0]}.csv`);
+        link.style.visibility = 'hidden';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+    };
 
     const CustomTooltip = ({ active, payload }) => {
         if (active && payload && payload.length) {
@@ -832,6 +733,7 @@ export default function App() {
                                 <Upload className="w-4 h-4" />
                                 <span className="hidden sm:inline">Import</span>
                                 <input
+                                    ref={fileInputRef}
                                     type="file"
                                     accept=".csv"
                                     onChange={importFromCSV}
@@ -1410,6 +1312,64 @@ export default function App() {
                             </div>
 
                         </form>
+                    </div>
+                </div>
+            )}
+
+            {/* Import Preview Modal */}
+            {isImportPreviewOpen && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm overflow-y-auto">
+                    <div className="bg-white rounded-2xl shadow-xl w-full max-w-4xl overflow-hidden my-8">
+                        <div className="p-4 border-b border-slate-100 flex justify-between items-center bg-slate-50">
+                            <div>
+                                <h2 className="text-lg font-bold text-slate-800">Import Preview — {importFileName}</h2>
+                                <p className="text-xs text-slate-500 mt-1">{importPreview.length} trades parsed</p>
+                            </div>
+                            <button onClick={cancelImportPreview} className="text-slate-400 hover:text-slate-600">
+                                <X className="w-5 h-5" />
+                            </button>
+                        </div>
+
+                        <div className="p-4">
+                            <div className="overflow-x-auto max-h-96">
+                                <table className="w-full text-sm">
+                                    <thead className="text-xs text-slate-500 uppercase bg-slate-50 border-b border-slate-100">
+                                        <tr>
+                                            <th className="px-3 py-2 text-left">Ticker</th>
+                                            <th className="px-3 py-2 text-left">Type</th>
+                                            <th className="px-3 py-2 text-right">Strike</th>
+                                            <th className="px-3 py-2 text-center">Qty</th>
+                                            <th className="px-3 py-2 text-right">Entry</th>
+                                            <th className="px-3 py-2 text-left">Opened</th>
+                                            <th className="px-3 py-2 text-left">Expiry</th>
+                                            <th className="px-3 py-2 text-left">Status</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-slate-100">
+                                        {importPreview.slice(0, 250).map((t, i) => (
+                                            <tr key={i} className="hover:bg-slate-50">
+                                                <td className="px-3 py-2 font-bold">{t.ticker && t.ticker.toUpperCase()}</td>
+                                                <td className="px-3 py-2">{t.type}</td>
+                                                <td className="px-3 py-2 text-right font-mono">${t.strike}</td>
+                                                <td className="px-3 py-2 text-center">{t.quantity}</td>
+                                                <td className="px-3 py-2 text-right font-mono">{formatCurrency(t.entryPrice)}</td>
+                                                <td className="px-3 py-2 text-xs">{formatDateShort(t.openedDate)}</td>
+                                                <td className="px-3 py-2 text-xs">{formatDateShort(t.expirationDate)}</td>
+                                                <td className="px-3 py-2"><span className={`px-2 py-0.5 rounded text-xs font-medium ${t.status === 'Rolled' ? 'bg-cyan-100 text-cyan-700' : 'bg-slate-100 text-slate-600'}`}>{t.status}</span></td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                            {importPreview.length > 250 && (
+                                <div className="text-xs text-slate-400 mt-2">Showing first 250 rows of {importPreview.length}</div>
+                            )}
+                        </div>
+
+                        <div className="p-4 border-t border-slate-100 flex justify-end gap-3">
+                            <button onClick={cancelImportPreview} className="px-4 py-2 border rounded-lg text-slate-700 hover:bg-slate-50">Cancel</button>
+                            <button onClick={confirmImport} className="px-4 py-2 bg-indigo-600 rounded-lg text-white font-bold hover:bg-indigo-700">Confirm & Import</button>
+                        </div>
                     </div>
                 </div>
             )}
