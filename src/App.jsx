@@ -155,6 +155,18 @@ export default function App() {
         return trades.slice(startIndex, startIndex + TRADES_PER_PAGE);
     }, [trades, currentPage]);
 
+    // chart data: sum pnl by openedDate for a simple P&L over time view
+    const chartData = useMemo(() => {
+        if (!trades || trades.length === 0) return [];
+        const byDate = {};
+        trades.forEach(t => {
+            const d = t.openedDate || '';
+            const m = calculateMetrics(t);
+            byDate[d] = (byDate[d] || 0) + (m.pnl || 0);
+        });
+        return Object.keys(byDate).sort().map(date => ({ date, pnl: byDate[date] }));
+    }, [trades]);
+
     // Reset to page 1 when trades change significantly
     useEffect(() => {
         if (currentPage > totalPages && totalPages > 0) {
@@ -679,8 +691,29 @@ export default function App() {
             {error && <div className="text-red-600 mb-2">{error}</div>}
 
             <main>
-                {/* Main trades UI is unchanged; this minimal render ensures import controls and preview are usable */}
-                <div className="text-sm text-gray-500">Trades list and charts remain below (not modified here).</div>
+                <div className="grid gap-4 md:grid-cols-2">
+                    <div className="bg-white border p-3 rounded">
+                        <h3 className="text-sm font-semibold mb-2">Premium P&L by Open Date</h3>
+                        {chartData.length ? (
+                            <ResponsiveContainer width="100%" height={200}>
+                                <AreaChart data={chartData}>
+                                    <defs>
+                                        <linearGradient id="pnlGradient" x1="0" y1="0" x2="0" y2="1">
+                                            <stop offset="0%" stopColor="#10b981" stopOpacity={0.4} />
+                                            <stop offset="100%" stopColor="#10b981" stopOpacity={0.05} />
+                                        </linearGradient>
+                                    </defs>
+                                    <XAxis dataKey="date" tickFormatter={formatDateShort} />
+                                    <YAxis />
+                                    <Tooltip formatter={(v) => formatCurrency(v)} labelFormatter={(l) => formatDate(l)} />
+                                    <Area type="monotone" dataKey="pnl" stroke="#10b981" fill="url(#pnlGradient)" />
+                                </AreaChart>
+                            </ResponsiveContainer>
+                        ) : (
+                            <div className="text-sm text-gray-500">No chart data yet</div>
+                        )}
+                    </div>
+                </div>
             </main>
 
             {isImportPreviewOpen && (
