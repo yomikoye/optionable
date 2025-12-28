@@ -107,6 +107,7 @@ export default function App() {
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [editingId, setEditingId] = useState(null);
     const [currentPage, setCurrentPage] = useState(1);
+    const [showTrades, setShowTrades] = useState(false);
 
     // Form State
     const initialFormState = {
@@ -678,6 +679,13 @@ export default function App() {
                     >
                         <Upload size={16} /> Import
                     </button>
+                    <button
+                        onClick={() => setShowTrades(s => !s)}
+                        className="flex items-center gap-2 px-3 py-1 bg-gray-800 text-white rounded"
+                        title="Show trades table"
+                    >
+                        <TrendingUp size={16} /> {showTrades ? 'Hide Trades' : 'Show Trades'}
+                    </button>
                     <input
                         ref={fileInputRef}
                         type="file"
@@ -714,22 +722,37 @@ export default function App() {
                         )}
                     </div>
                 </div>
-            </main>
 
-            {isImportPreviewOpen && (
-                <div className="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center">
-                    <div className="bg-white max-w-4xl w-full p-4 rounded">
+                {showTrades && (
+                    <div className="bg-white border p-3 rounded mt-4">
                         <div className="flex items-center justify-between mb-2">
-                            <h2 className="font-semibold">Import Preview ({importPreview.length})</h2>
+                            <h3 className="text-sm font-semibold">Trades</h3>
                             <div className="flex items-center gap-2">
-                                <button className="px-3 py-1 bg-gray-200 rounded" onClick={cancelImportPreview}>Cancel</button>
-                                <button className="px-3 py-1 bg-blue-600 text-white rounded" onClick={confirmImport}>Confirm Import</button>
+                                <button className="px-2 py-1 bg-gray-100 rounded" onClick={() => setCurrentPage(1)}>First</button>
+                                <button
+                                    className="px-2 py-1 rounded bg-gray-100"
+                                    onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                                    disabled={currentPage === 1}
+                                >
+                                    <ChevronLeft size={16} />
+                                </button>
+                                <div className="px-2">Page {currentPage} / {totalPages || 1}</div>
+                                <button
+                                    className="px-2 py-1 rounded bg-gray-100"
+                                    onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                                    disabled={currentPage === totalPages}
+                                >
+                                    <ChevronRight size={16} />
+                                </button>
+                                <button className="px-2 py-1 bg-blue-600 text-white rounded" onClick={exportToCSV}><Download size={14} /> Export</button>
                             </div>
                         </div>
-                        <div className="overflow-auto max-h-96 border rounded">
+
+                        <div className="overflow-auto">
                             <table className="min-w-full">
                                 <thead className="bg-gray-100">
                                     <tr>
+                                        <th className="p-2 text-left">ID</th>
                                         <th className="p-2 text-left">Ticker</th>
                                         <th className="p-2">Type</th>
                                         <th className="p-2">Strike</th>
@@ -739,35 +762,45 @@ export default function App() {
                                         <th className="p-2">Opened</th>
                                         <th className="p-2">Exp</th>
                                         <th className="p-2">Status</th>
-                                        <th className="p-2">Action</th>
+                                        <th className="p-2">Actions</th>
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    {importPreview.map((row, i) => (
-                                        <tr key={i} className={row.status === 'Rolled' ? 'bg-yellow-50' : ''}>
-                                            <td className="p-1"><input className="border rounded px-1" value={row.ticker} onChange={(e) => updateImportRow(i, 'ticker', e.target.value)} /></td>
-                                            <td className="p-1"><input className="border rounded px-1" value={row.type} onChange={(e) => updateImportRow(i, 'type', e.target.value)} /></td>
-                                            <td className="p-1"><input className="border rounded px-1" value={row.strike} onChange={(e) => updateImportRow(i, 'strike', e.target.value)} /></td>
-                                            <td className="p-1"><input className="border rounded px-1" value={row.quantity} onChange={(e) => updateImportRow(i, 'quantity', e.target.value)} /></td>
-                                            <td className="p-1"><input className="border rounded px-1" value={row.entryPrice} onChange={(e) => updateImportRow(i, 'entryPrice', e.target.value)} /></td>
-                                            <td className="p-1"><input className="border rounded px-1" value={row.closePrice} onChange={(e) => updateImportRow(i, 'closePrice', e.target.value)} /></td>
-                                            <td className="p-1"><input className="border rounded px-1" value={row.openedDate} onChange={(e) => updateImportRow(i, 'openedDate', e.target.value)} /></td>
-                                            <td className="p-1"><input className="border rounded px-1" value={row.expirationDate} onChange={(e) => updateImportRow(i, 'expirationDate', e.target.value)} /></td>
-                                            <td className="p-1">{row.status}</td>
-                                            <td className="p-1"><button onClick={() => removeImportRow(i)} className="text-red-600"><Trash2 size={14} /></button></td>
+                                    {paginatedTrades.map((t, idx) => (
+                                        <tr key={t.id ?? idx} className="odd:bg-white even:bg-gray-50">
+                                            <td className="p-2 text-sm">{t.id}</td>
+                                            <td className="p-2 text-sm">{t.ticker}</td>
+                                            <td className="p-2 text-sm">{t.type}</td>
+                                            <td className="p-2 text-sm">{t.strike}</td>
+                                            <td className="p-2 text-sm">{t.quantity}</td>
+                                            <td className="p-2 text-sm">{formatCurrency(Number(t.entryPrice) || 0)}</td>
+                                            <td className="p-2 text-sm">{formatCurrency(Number(t.closePrice) || 0)}</td>
+                                            <td className="p-2 text-sm">{formatDate(t.openedDate)}</td>
+                                            <td className="p-2 text-sm">{formatDate(t.expirationDate)}</td>
+                                            <td className="p-2 text-sm">{t.status}</td>
+                                            <td className="p-2 text-sm flex items-center gap-2">
+                                                <button title="Edit" className="p-1" onClick={() => openModal(t)}><Edit2 size={14} /></button>
+                                                <button title="Duplicate" className="p-1" onClick={() => duplicateTrade(t)}><Copy size={14} /></button>
+                                                <button title="Roll" className="p-1" onClick={() => rollTrade(t)}><Link2 size={14} /></button>
+                                                <button title="Delete" className="p-1 text-red-600" onClick={() => deleteTrade(t.id)}><Trash2 size={14} /></button>
+                                            </td>
                                         </tr>
                                     ))}
                                 </tbody>
                             </table>
                         </div>
-                        <div className="mt-3 flex items-center justify-between">
-                            <button className="px-3 py-1 bg-gray-200 rounded" onClick={addImportRow}><Plus size={14} /> Add row</button>
-                            <div className="text-sm text-gray-500">Showing up to 250 rows</div>
-                        </div>
+
+                        {paginatedTrades.length === 0 && <div className="text-sm text-gray-500 p-2">No trades available</div>}
                     </div>
-                </div>
-            )}
-        </div>
-    );
-};
+                )}
+            </main>
+
+            {isImportPreviewOpen && (
+                <div className="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center">
+                    <div className="bg-white max-w-4xl w-full p-4 rounded">
+                        <div className="flex items-center justify-between mb-2">
+                            <h2 className="font-semibold">Import Preview ({importPreview.length})</h2>
+                            <div className="flex items-center gap-2">
+                                <button className="px-3 py-1 bg-gray-200 rounded" onClick={cancelImportPreview}>Cancel</button>
+                                <button className="px-3 py-1 bg-blue-600 text-white rounded" onClick={confirmImport}>
 
