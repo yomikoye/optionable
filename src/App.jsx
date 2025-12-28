@@ -98,6 +98,7 @@ export default function App() {
     const [trades, setTrades] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
+    const [importFormat, setImportFormat] = useState('auto'); // 'auto' | 'optionable' | 'activity'
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [editingId, setEditingId] = useState(null);
     const [currentPage, setCurrentPage] = useState(1);
@@ -366,74 +367,202 @@ export default function App() {
         document.body.removeChild(link);
     };
 
-    // --- CSV Import ---
+    // --- CSV helpers and format mapping ---
+    const parseCSV = (text) => {
+        const parseLine = (line) => {
+            const values = [];
+            let cur = '';
+            let inQuotes = false;
+            for (let i = 0; i < line.length; i++) {
+                const ch = line[i];
+                if (ch === '"') {
+                    if (inQuotes && line[i + 1] === '"') {
+                        cur += '"';
+                        i++;
+                    } else {
+                        inQuotes = !inQuotes;
+                    }
+                } else if (ch === ',' && !inQuotes) {
+                    values.push(cur);
+                    cur = '';
+                } else {
+                    cur += ch;
+                }
+            }
+            values.push(cur);
+            return values.map(v => v.trim().replace(/^"|"$/g, ''));
+        };
+
+        const lines = text.split(/\r?\n/).filter(l => l.trim() !== '');
+        if (lines.length === 0) return { headers: [], rows: [] };
+        const headers = parseLine(lines[0]).map(h => h.trim());
+        const rows = lines.slice(1).map(line => parseLine(line));
+        return { headers, rows };
+    };
+
+    const normalizeKey = k => k.replace(/\s+/g, '').toLowerCase();
+
+    const parseDateString = (s) => {
+        if (!s) return null;
+        // Try native Date parse first (handles ISO and common formats)
+        const d = new Date(s);
+        if (!isNaN(d)) {
+            return d.toISOString().split('T')[0];
+        }
+        // Try MM/DD/YYYY or M/D/YY
+        const m = s.match(/(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})/);
+        if (m) {
+            let yr = m[3].length === 2 ? `20${m[3]}` : m[3];
+            const mm = String(Number(m[1])).padStart(2, '0');
+            const dd = String(Number(m[2])).padStart(2, '0');
+            return `${yr}-${mm}-${dd}`;
+        }
+        return null;
+    };
+
+    const parseInstrument = (instr = '', desc = '') => {
+        const s = `${instr || ''} ${desc || ''}`;
+        const result = { ticker: null, strike: null, type: null, expirationDate: null };
+
+        // Ticker: first token of letters (1-6)
+        const tk = s.match(/\b([A-Z]{1,6})\b/i);
+        if (tk) result.ticker = tk[1].toUpperCase();
+
+        // Type: look for 'put' or 'call'
+        const typeMatch = s.match(/\b(PUT|CALL|P|C)\b/i);
+        if (typeMatch) {
+            const t = typeMatch[1].toLowerCase();
+            result.type = t.startsWith('p') ? 'CSP' : 'CC';
+        }
+
+        // Strike: last numeric token that looks like a strike
+        const strikeMatch = s.match(/(?:\$)?(\d{1,5}(?:\.\d+)?)(?![\/\d])/g);
+        if (strikeMatch && strikeMatch.length) {
+            // prefer the numeric token that's not a date
+            for (let i = strikeMatch.length - 1; i >= 0; i--) {
+                const n = strikeMatch[i].replace('$', '');
+                if (!n.includes('/')) {
+                    result.strike = Number(n);
+                    break;
+                }
+            }
+        }
+
+        // Expiration: look for MM/DD/YYYY or MM/DD/YY or yyyy-mm-dd
+        const dateRegex = /(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4})|(\d{4}[\/\-]\d{1,2}[\/\-]\d{1,2})/;
+        const dateMatch = s.match(dateRegex);
+        if (dateMatch) {
+            result.expirationDate = parseDateString(dateMatch[0]);
+        }
+
+        return result;
+    };
+
     const importFromCSV = async (event) => {
         const file = event.target.files?.[0];
         if (!file) return;
 
         try {
             const text = await file.text();
-            const lines = text.split('\n').filter(line => line.trim());
+            const { headers, rows } = parseCSV(text);
 
-            if (lines.length < 2) {
+            if (headers.length === 0 || rows.length === 0) {
                 setError('CSV file is empty or invalid');
                 return;
             }
 
-            const headers = lines[0].split(',').map(h => h.trim());
+            const norm = headers.map(h => normalizeKey(h));
+            // detect activity style file (example headers provided)
+            const looksLikeActivity = norm.includes('activitydate') || norm.includes('instrument');
+            const format = importFormat === 'auto' ? (looksLikeActivity ? 'activity' : 'optionable') : importFormat;
+
+            // Required for standard optionable csv
             const requiredHeaders = ['ticker', 'type', 'strike', 'entryPrice', 'openedDate', 'expirationDate', 'status'];
-            const missingHeaders = requiredHeaders.filter(h => !headers.includes(h));
-
-            if (missingHeaders.length > 0) {
-                setError(`Missing required columns: ${missingHeaders.join(', ')}`);
-                return;
+            if (format === 'optionable') {
+                const missingHeaders = requiredHeaders.filter(h => !norm.includes(h.toLowerCase()));
+                if (missingHeaders.length > 0) {
+                    setError(`Missing required columns: ${missingHeaders.join(', ')}`);
+                    return;
+                }
             }
 
-            const tradesToImport = [];
-            for (let i = 1; i < lines.length; i++) {
-                const values = lines[i].split(',').map(v => v.trim().replace(/^"|"$/g, ''));
-                const trade = {};
-                headers.forEach((header, index) => {
-                    trade[header] = values[index] || null;
-                });
+            const tradesToImport = rows.map(vals => {
+                const rowObj = {};
+                headers.forEach((h, idx) => rowObj[normalizeKey(h)] = vals[idx] || '');
 
-                // Validate and convert types
-                tradesToImport.push({
-                    ticker: trade.ticker,
-                    type: trade.type,
-                    strike: Number(trade.strike) || 0,
-                    quantity: Number(trade.quantity) || 1,
-                    delta: trade.delta ? Number(trade.delta) : null,
-                    entryPrice: Number(trade.entryPrice) || 0,
-                    closePrice: Number(trade.closePrice) || 0,
-                    openedDate: trade.openedDate,
-                    expirationDate: trade.expirationDate,
-                    closedDate: trade.closedDate || null,
-                    status: trade.status || 'Open',
-                    parentTradeId: trade.parentTradeId ? Number(trade.parentTradeId) : null,
-                });
-            }
+                if (format === 'activity') {
+                    // Map activity CSV -> expected trade fields
+                    const instr = rowObj['instrument'] || '';
+                    const desc = rowObj['description'] || '';
+                    const parsed = parseInstrument(instr, desc);
 
-            // Import trades via API
-            const response = await fetch(`${API_URL}/trades/import`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ trades: tradesToImport }),
+                    const qty = Number(rowObj['quantity'] || rowObj['qty'] || 1) || 1;
+                    let entryPrice = null;
+                    const priceVal = rowObj['price'] !== undefined ? Number(rowObj['price']) : NaN;
+                    const amountVal = rowObj['amount'] !== undefined ? Number(rowObj['amount']) : NaN;
+                    if (!isNaN(priceVal) && priceVal !== 0) {
+                        entryPrice = priceVal;
+                    } else if (!isNaN(amountVal) && qty !== 0) {
+                        entryPrice = Math.abs(amountVal) / (qty * 100);
+                    }
+
+                    const openedDate = parseDateString(rowObj['activitydate'] || rowObj['processdate'] || '');
+                    const closedDate = parseDateString(rowObj['settledate'] || '');
+                    const status = closedDate ? 'Closed' : 'Open';
+
+                    return {
+                        ticker: parsed.ticker,
+                        type: parsed.type || 'CSP',
+                        strike: parsed.strike || 0,
+                        quantity: qty,
+                        delta: null,
+                        entryPrice: entryPrice || 0,
+                        closePrice: closedDate ? (entryPrice || 0) : 0,
+                        openedDate: openedDate || (parsed.expirationDate ? parsed.expirationDate : new Date().toISOString().split('T')[0]),
+                        expirationDate: parsed.expirationDate || '',
+                        closedDate: closedDate || null,
+                        status,
+                        parentTradeId: null,
+                    };
+                } else {
+                    // Optionable / standard CSV import (legacy)
+                    return {
+                        ticker: rowObj['ticker'],
+                        type: rowObj['type'],
+                        strike: Number(rowObj['strike']) || 0,
+                        quantity: Number(rowObj['quantity']) || 1,
+                        delta: rowObj['delta'] ? Number(rowObj['delta']) : null,
+                        entryPrice: Number(rowObj['entryprice']) || 0,
+                        closePrice: Number(rowObj['closeprice']) || 0,
+                        openedDate: rowObj['openeddate'],
+                        expirationDate: rowObj['expirationdate'],
+                        closedDate: rowObj['closeddate'] || null,
+                        status: rowObj['status'] || 'Open',
+                        parentTradeId: rowObj['parenttradeid'] ? Number(rowObj['parenttradeid']) : null,
+                    };
+                }
             });
 
-            if (!response.ok) throw new Error('Failed to import trades');
+             // Import trades via API
+             const response = await fetch(`${API_URL}/trades/import`, {
+                 method: 'POST',
+                 headers: { 'Content-Type': 'application/json' },
+                 body: JSON.stringify({ trades: tradesToImport }),
+             });
 
-            const result = await response.json();
-            await fetchTrades();
-            alert(`Successfully imported ${result.imported} trades!`);
-        } catch (err) {
-            console.error('Error importing CSV:', err);
-            setError('Failed to import CSV. Please check the file format.');
-        }
+             if (!response.ok) throw new Error('Failed to import trades');
 
-        // Reset file input
-        event.target.value = '';
-    };
+             const result = await response.json();
+             await fetchTrades();
+             alert(`Successfully imported ${result.imported} trades!`);
+         } catch (err) {
+             console.error('Error importing CSV:', err);
+             setError('Failed to import CSV. Please check the file format.');
+         }
+
+         // Reset file input
+         event.target.value = '';
+     };
 
     // --- Aggregation Logic ---
     const stats = useMemo(() => {
@@ -628,16 +757,28 @@ export default function App() {
                         </button>
 
                         {/* Import Button */}
-                        <label className="flex items-center gap-2 bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-2 rounded-lg font-medium transition-colors cursor-pointer" title="Import from CSV">
-                            <Upload className="w-4 h-4" />
-                            <span className="hidden sm:inline">Import</span>
-                            <input
-                                type="file"
-                                accept=".csv"
-                                onChange={importFromCSV}
-                                className="hidden"
-                            />
-                        </label>
+                        <div className="flex items-center gap-2">
+                            <label className="flex items-center gap-2 bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-2 rounded-lg font-medium transition-colors cursor-pointer" title="Import from CSV">
+                                <Upload className="w-4 h-4" />
+                                <span className="hidden sm:inline">Import</span>
+                                <input
+                                    type="file"
+                                    accept=".csv"
+                                    onChange={importFromCSV}
+                                    className="hidden"
+                                />
+                            </label>
+                            <select
+                                value={importFormat}
+                                onChange={(e) => setImportFormat(e.target.value)}
+                                className="text-xs px-2 py-1 border rounded bg-white"
+                                title="Import format (auto-detect or select format)"
+                            >
+                                <option value="auto">Auto-detect</option>
+                                <option value="optionable">Optionable CSV</option>
+                                <option value="activity">Activity CSV</option>
+                            </select>
+                        </div>
 
                         {/* New Trade Button */}
                         <button
