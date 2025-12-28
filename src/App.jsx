@@ -400,17 +400,27 @@ export default function App() {
         return { headers, rows };
     };
 
-    const normalizeKey = k => k.replace(/\s+/g, '').toLowerCase();
+    const normalizeKey = k => (k || '').replace(/\s+/g, '').toLowerCase();
+
+    const cleanNumber = (s) => {
+        if (s === undefined || s === null) return NaN;
+        const str = String(s).trim();
+        if (str === '') return NaN;
+        // Remove $ and commas
+        let cleaned = str.replace(/\$/g, '').replace(/,/g, '');
+        // Handle parentheses for negatives
+        const isParenNeg = /^\(.*\)$/.test(cleaned);
+        cleaned = cleaned.replace(/^\(|\)$/g, '');
+        const n = Number(cleaned);
+        if (isNaN(n)) return NaN;
+        return isParenNeg ? -Math.abs(n) : n;
+    };
 
     const parseDateString = (s) => {
         if (!s) return null;
-        // Try native Date parse first (handles ISO and common formats)
         const d = new Date(s);
-        if (!isNaN(d)) {
-            return d.toISOString().split('T')[0];
-        }
-        // Try MM/DD/YYYY or M/D/YY
-        const m = s.match(/(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})/);
+        if (!isNaN(d)) return d.toISOString().split('T')[0];
+        const m = s.match(/(\d{1,2})\/\-\/\-/);
         if (m) {
             let yr = m[3].length === 2 ? `20${m[3]}` : m[3];
             const mm = String(Number(m[1])).padStart(2, '0');
@@ -420,25 +430,23 @@ export default function App() {
         return null;
     };
 
+    const normalizeDescription = (s) => (s || '').replace(/\$/g, '').replace(/,/g, '').replace(/\s+/g, ' ').trim().toLowerCase();
+
     const parseInstrument = (instr = '', desc = '') => {
         const s = `${instr || ''} ${desc || ''}`;
         const result = { ticker: null, strike: null, type: null, expirationDate: null };
 
-        // Ticker: first token of letters (1-6)
         const tk = s.match(/\b([A-Z]{1,6})\b/i);
         if (tk) result.ticker = tk[1].toUpperCase();
 
-        // Type: look for 'put' or 'call'
         const typeMatch = s.match(/\b(PUT|CALL|P|C)\b/i);
         if (typeMatch) {
             const t = typeMatch[1].toLowerCase();
             result.type = t.startsWith('p') ? 'CSP' : 'CC';
         }
 
-        // Strike: last numeric token that looks like a strike
         const strikeMatch = s.match(/(?:\$)?(\d{1,5}(?:\.\d+)?)(?![\/\d])/g);
         if (strikeMatch && strikeMatch.length) {
-            // prefer the numeric token that's not a date
             for (let i = strikeMatch.length - 1; i >= 0; i--) {
                 const n = strikeMatch[i].replace('$', '');
                 if (!n.includes('/')) {
@@ -448,12 +456,9 @@ export default function App() {
             }
         }
 
-        // Expiration: look for MM/DD/YYYY or MM/DD/YY or yyyy-mm-dd
         const dateRegex = /(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4})|(\d{4}[\/\-]\d{1,2}[\/\-]\d{1,2})/;
         const dateMatch = s.match(dateRegex);
-        if (dateMatch) {
-            result.expirationDate = parseDateString(dateMatch[0]);
-        }
+        if (dateMatch) result.expirationDate = parseDateString(dateMatch[0]);
 
         return result;
     };
@@ -472,7 +477,6 @@ export default function App() {
             }
 
             const norm = headers.map(h => normalizeKey(h));
-            // detect activity style file (example headers provided)
             const looksLikeActivity = norm.includes('activitydate') || norm.includes('instrument');
             const format = importFormat === 'auto' ? (looksLikeActivity ? 'activity' : 'optionable') : importFormat;
 
@@ -486,47 +490,113 @@ export default function App() {
                 }
             }
 
-            const tradesToImport = rows.map(vals => {
-                const rowObj = {};
-                headers.forEach((h, idx) => rowObj[normalizeKey(h)] = vals[idx] || '');
+            const tradesToImport = [];
 
-                if (format === 'activity') {
-                    // Map activity CSV -> expected trade fields
-                    const instr = rowObj['instrument'] || '';
-                    const desc = rowObj['description'] || '';
-                    const parsed = parseInstrument(instr, desc);
-
+            if (format === 'activity') {
+                // Build activities array
+                const activities = rows.map(vals => {
+                    const rowObj = {};
+                    headers.forEach((h, idx) => rowObj[normalizeKey(h)] = vals[idx] || '');
+                    const activityDate = parseDateString(rowObj['activitydate'] || rowObj['activity date'] || '');
+                    const transCode = (rowObj['transcode'] || rowObj['trans code'] || '').toUpperCase();
+                    const parsed = parseInstrument(rowObj['instrument'] || '', rowObj['description'] || '');
                     const qty = Number(rowObj['quantity'] || rowObj['qty'] || 1) || 1;
-                    let entryPrice = null;
                     const priceVal = rowObj['price'] !== undefined ? Number(rowObj['price']) : NaN;
                     const amountVal = rowObj['amount'] !== undefined ? Number(rowObj['amount']) : NaN;
-                    if (!isNaN(priceVal) && priceVal !== 0) {
-                        entryPrice = priceVal;
-                    } else if (!isNaN(amountVal) && qty !== 0) {
-                        entryPrice = Math.abs(amountVal) / (qty * 100);
+                    const computedPrice = !isNaN(priceVal) && priceVal !== 0
+                        ? priceVal
+                        : (!isNaN(amountVal) && qty !== 0 ? Math.abs(amountVal) / (qty * 100) : 0);
+                    return {
+                        rowObj,
+                        parsed,
+                        activityDate,
+                        transCode,
+                        computedPrice,
+                        qty,
+                        descriptionNormalized: (rowObj['description'] || '').trim().toLowerCase()
+                    };
+                });
+
+                // Create trades for STO (sell-to-open) rows and others where appropriate
+                const stoTrades = [];
+                activities.forEach((act, idx) => {
+                    // We'll treat STO rows as openings; also include other opening codes if needed later
+                    if (act.transCode.includes('STO') || act.transCode.includes('SSO')) {
+                        const t = {
+                            _activityIndex: idx,
+                            ticker: act.parsed.ticker,
+                            type: act.parsed.type || (act.descriptionNormalized.includes('put') ? 'CSP' : 'CC'),
+                            strike: act.parsed.strike || 0,
+                            quantity: act.qty || 1,
+                            delta: null,
+                            entryPrice: act.computedPrice || 0,
+                            closePrice: 0,
+                            openedDate: act.activityDate || new Date().toISOString().split('T')[0],
+                            expirationDate: act.parsed.expirationDate || '',
+                            closedDate: null,
+                            status: 'Open',
+                            parentTradeId: null,
+                        };
+                        stoTrades.push(t);
+                    } else {
+                        // Non-opening rows are ignored for creating initial open trades
+                    }
+                });
+
+                // Find matching BTC rows for Put STOs -> mark as Rolled
+                const usedBtc = new Set();
+                stoTrades.forEach((sto) => {
+                    const act = activities[sto._activityIndex];
+                    if (!act || !act.descriptionNormalized.includes('put') || !act.transCode.includes('STO')) return;
+
+                    // Find BTC with same description normalized, same ticker (if available), on or after STO date
+                    let matched = null;
+                    for (let i = 0; i < activities.length; i++) {
+                        if (usedBtc.has(i)) continue;
+                        const cand = activities[i];
+                        if (!cand.transCode.includes('BTC')) continue;
+                        if (cand.descriptionNormalized !== act.descriptionNormalized) continue;
+                        if (sto.ticker && cand.parsed.ticker && sto.ticker !== cand.parsed.ticker) continue;
+                        // require BTC activity date >= STO activity date
+                        if (cand.activityDate && act.activityDate && new Date(cand.activityDate) < new Date(act.activityDate)) continue;
+                        matched = { idx: i, cand };
+                        break;
                     }
 
-                    const openedDate = parseDateString(rowObj['activitydate'] || rowObj['processdate'] || '');
-                    const closedDate = parseDateString(rowObj['settledate'] || '');
-                    const status = closedDate ? 'Closed' : 'Open';
+                    if (matched) {
+                        usedBtc.add(matched.idx);
+                        sto.closedDate = matched.cand.activityDate;
+                        sto.closePrice = matched.cand.computedPrice || sto.entryPrice;
+                        sto.status = 'Rolled';
+                    }
+                });
 
-                    return {
-                        ticker: parsed.ticker,
-                        type: parsed.type || 'CSP',
-                        strike: parsed.strike || 0,
-                        quantity: qty,
-                        delta: null,
-                        entryPrice: entryPrice || 0,
-                        closePrice: closedDate ? (entryPrice || 0) : 0,
-                        openedDate: openedDate || (parsed.expirationDate ? parsed.expirationDate : new Date().toISOString().split('T')[0]),
-                        expirationDate: parsed.expirationDate || '',
-                        closedDate: closedDate || null,
-                        status,
+                // Finalize trades to import (include all STO trades)
+                stoTrades.forEach(t => {
+                    // remove helper prop
+                    delete t._activityIndex;
+                    tradesToImport.push({
+                        ticker: t.ticker,
+                        type: t.type,
+                        strike: Number(t.strike) || 0,
+                        quantity: Number(t.quantity) || 1,
+                        delta: t.delta,
+                        entryPrice: Number(t.entryPrice) || 0,
+                        closePrice: Number(t.closePrice) || 0,
+                        openedDate: t.openedDate,
+                        expirationDate: t.expirationDate,
+                        closedDate: t.closedDate || null,
+                        status: t.status || 'Open',
                         parentTradeId: null,
-                    };
-                } else {
-                    // Optionable / standard CSV import (legacy)
-                    return {
+                    });
+                });
+
+            } else {
+                // Optionable / standard CSV import (legacy)
+                for (const vals of rows) {
+                    const rowObj = {};
+                    headers.forEach((h, idx) => rowObj[normalizeKey(h)] = vals[idx] || '');
+                    tradesToImport.push({
                         ticker: rowObj['ticker'],
                         type: rowObj['type'],
                         strike: Number(rowObj['strike']) || 0,
@@ -539,9 +609,9 @@ export default function App() {
                         closedDate: rowObj['closeddate'] || null,
                         status: rowObj['status'] || 'Open',
                         parentTradeId: rowObj['parenttradeid'] ? Number(rowObj['parenttradeid']) : null,
-                    };
+                    });
                 }
-            });
+            }
 
              // Import trades via API
              const response = await fetch(`${API_URL}/trades/import`, {
@@ -756,7 +826,7 @@ export default function App() {
                             <span className="hidden sm:inline">Export</span>
                         </button>
 
-                        {/* Import Button */}
+                        {/* Import Button + format selector */}
                         <div className="flex items-center gap-2">
                             <label className="flex items-center gap-2 bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-2 rounded-lg font-medium transition-colors cursor-pointer" title="Import from CSV">
                                 <Upload className="w-4 h-4" />
