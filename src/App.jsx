@@ -802,5 +802,51 @@ export default function App() {
                             <h2 className="font-semibold">Import Preview ({importPreview.length})</h2>
                             <div className="flex items-center gap-2">
                                 <button className="px-3 py-1 bg-gray-200 rounded" onClick={cancelImportPreview}>Cancel</button>
-                                <button className="px-3 py-1 bg-blue-600 text-white rounded" onClick={confirmImport}>
+                                <button className="px-3 py-1 bg-blue-600 text-white rounded" onClick={confirmImport}>Confirm Import</button>
+                            </div>
+                        </div>
+                        <div className="overflow-auto max-h-96 border rounded">
+                            <table className="min-w-full">
+                                <thead className="bg-gray-100">
+                                    <tr>
+                                        <th className="p-2 text-left">Ticker</th>
+                                        <th className="p-2">Type</th>
+                                        <th className="p-2">Strike</th>
+                                        <th className="p-2">Qty</th>
+                                        <th className="p-2">Entry</th>
+                                        <th className="p-2">Close</th>
+                                        <th className="p-2">Opened</th>
+                                        <th className="p-2">Exp</th>
+                                        <th className="p-2">Status</th>
+                                        <th className="p-2">Action</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {importPreview.map((row, i) => (
+                                        <tr key={i} className={row.status === 'Rolled' ? 'bg-yellow-50' : ''}>
+                                            <td className="p-1"><input className="border rounded px-1" value={row.ticker || ''} onChange={(e) => updateImportRow(i, 'ticker', e.target.value)} /></td>
+                                            <td className="p-1"><input className="border rounded px-1" value={row.type || ''} onChange={(e) => updateImportRow(i, 'type', e.target.value)} /></td>
+                                            <td className="p-1"><input className="border rounded px-1" value={row.strike ?? ''} onChange={(e) => updateImportRow(i, 'strike', e.target.value)} /></td>
+                                            <td className="p-1"><input className="border rounded px-1" value={row.quantity ?? ''} onChange={(e) => updateImportRow(i, 'quantity', e.target.value)} /></td>
+                                            <td className="p-1"><input className="border rounded px-1" value={row.entryPrice ?? ''} onChange={(e) => updateImportRow(i, 'entryPrice', e.target.value)} /></td>
+                                            <td className="p-1"><input className="border rounded px-1" value={row.closePrice ?? ''} onChange={(e) => updateImportRow(i, 'closePrice', e.target.value)} /></td>
+                                            <td className="p-1"><input className="border rounded px-1" value={row.openedDate || ''} onChange={(e) => updateImportRow(i, 'openedDate', e.target.value)} /></td>
+                                            <td className="p-1"><input className="border rounded px-1" value={row.expirationDate || ''} onChange={(e) => updateImportRow(i, 'expirationDate', e.target.value)} /></td>
+                                            <td className="p-1">{row.status}</td>
+                                            <td className="p-1"><button onClick={() => removeImportRow(i)} className="text-red-600"><Trash2 size={14} /></button></td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                        <div className="mt-3 flex items-center justify-between">
+                            <button className="px-3 py-1 bg-gray-200 rounded" onClick={addImportRow}><Plus size={14} /> Add row</button>
+                            <div className="text-sm text-gray-500">Showing up to 250 rows</div>
+                        </div>
+                    </div>
+                </div>
+            )}
+        </div>
+    );
+}
 
