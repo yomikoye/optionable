@@ -463,6 +463,7 @@ export default function App() {
         return result;
     };
 
+    // --- CSV Import ---
     const importFromCSV = async (event) => {
         const file = event.target.files?.[0];
         if (!file) return;
@@ -477,10 +478,10 @@ export default function App() {
             }
 
             const norm = headers.map(h => normalizeKey(h));
-            const looksLikeActivity = norm.includes('activitydate') || norm.includes('instrument');
+            const looksLikeActivity = norm.includes('activitydate') || norm.includes('instrument') || norm.includes('transcode');
             const format = importFormat === 'auto' ? (looksLikeActivity ? 'activity' : 'optionable') : importFormat;
 
-            // Required for standard optionable csv
+            // Optionable standard check
             const requiredHeaders = ['ticker', 'type', 'strike', 'entryPrice', 'openedDate', 'expirationDate', 'status'];
             if (format === 'optionable') {
                 const missingHeaders = requiredHeaders.filter(h => !norm.includes(h.toLowerCase()));
@@ -493,19 +494,22 @@ export default function App() {
             const tradesToImport = [];
 
             if (format === 'activity') {
-                // Build activities array
+                // Build normalized activities
                 const activities = rows.map(vals => {
                     const rowObj = {};
                     headers.forEach((h, idx) => rowObj[normalizeKey(h)] = vals[idx] || '');
                     const activityDate = parseDateString(rowObj['activitydate'] || rowObj['activity date'] || '');
                     const transCode = (rowObj['transcode'] || rowObj['trans code'] || '').toUpperCase();
-                    const parsed = parseInstrument(rowObj['instrument'] || '', rowObj['description'] || '');
+                    const description = rowObj['description'] || '';
+                    const descNorm = normalizeDescription(description);
+                    const parsed = parseInstrument(rowObj['instrument'] || '', description);
                     const qty = Number(rowObj['quantity'] || rowObj['qty'] || 1) || 1;
-                    const priceVal = rowObj['price'] !== undefined ? Number(rowObj['price']) : NaN;
-                    const amountVal = rowObj['amount'] !== undefined ? Number(rowObj['amount']) : NaN;
-                    const computedPrice = !isNaN(priceVal) && priceVal !== 0
-                        ? priceVal
-                        : (!isNaN(amountVal) && qty !== 0 ? Math.abs(amountVal) / (qty * 100) : 0);
+                    const priceNum = cleanNumber(rowObj['price']);
+                    const amountNum = cleanNumber(rowObj['amount']);
+                    const computedPrice = !isNaN(priceNum) && priceNum !== 0
+                        ? priceNum
+                        : (!isNaN(amountNum) && qty !== 0 ? Math.abs(amountNum) / (qty * 100) : 0);
+
                     return {
                         rowObj,
                         parsed,
@@ -513,19 +517,19 @@ export default function App() {
                         transCode,
                         computedPrice,
                         qty,
-                        descriptionNormalized: (rowObj['description'] || '').trim().toLowerCase()
+                        description,
+                        descNorm
                     };
                 });
 
-                // Create trades for STO (sell-to-open) rows and others where appropriate
+                // Create STO (sell-to-open) trades for rows that look like STO and include 'put' in the description
                 const stoTrades = [];
                 activities.forEach((act, idx) => {
-                    // We'll treat STO rows as openings; also include other opening codes if needed later
-                    if (act.transCode.includes('STO') || act.transCode.includes('SSO')) {
-                        const t = {
+                    if (act.transCode === 'STO' && act.descNorm.includes('put')) {
+                        stoTrades.push({
                             _activityIndex: idx,
                             ticker: act.parsed.ticker,
-                            type: act.parsed.type || (act.descriptionNormalized.includes('put') ? 'CSP' : 'CC'),
+                            type: act.parsed.type || 'CSP',
                             strike: act.parsed.strike || 0,
                             quantity: act.qty || 1,
                             delta: null,
@@ -535,34 +539,29 @@ export default function App() {
                             expirationDate: act.parsed.expirationDate || '',
                             closedDate: null,
                             status: 'Open',
-                            parentTradeId: null,
-                        };
-                        stoTrades.push(t);
-                    } else {
-                        // Non-opening rows are ignored for creating initial open trades
+                            description: act.description,
+                            descNorm: act.descNorm
+                        });
                     }
                 });
 
-                // Find matching BTC rows for Put STOs -> mark as Rolled
+                // Match STO -> BTC (same normalized description, BTC on/after STO)
                 const usedBtc = new Set();
                 stoTrades.forEach((sto) => {
                     const act = activities[sto._activityIndex];
-                    if (!act || !act.descriptionNormalized.includes('put') || !act.transCode.includes('STO')) return;
-
-                    // Find BTC with same description normalized, same ticker (if available), on or after STO date
+                    if (!act) return;
                     let matched = null;
                     for (let i = 0; i < activities.length; i++) {
                         if (usedBtc.has(i)) continue;
                         const cand = activities[i];
-                        if (!cand.transCode.includes('BTC')) continue;
-                        if (cand.descriptionNormalized !== act.descriptionNormalized) continue;
+                        if (cand.transCode !== 'BTC') continue;
+                        if (cand.descNorm !== act.descNorm) continue;
                         if (sto.ticker && cand.parsed.ticker && sto.ticker !== cand.parsed.ticker) continue;
-                        // require BTC activity date >= STO activity date
+                        // require BTC activity date >= STO activity date (if both present)
                         if (cand.activityDate && act.activityDate && new Date(cand.activityDate) < new Date(act.activityDate)) continue;
                         matched = { idx: i, cand };
                         break;
                     }
-
                     if (matched) {
                         usedBtc.add(matched.idx);
                         sto.closedDate = matched.cand.activityDate;
@@ -571,10 +570,11 @@ export default function App() {
                     }
                 });
 
-                // Finalize trades to import (include all STO trades)
+                // Finalize trades to import
                 stoTrades.forEach(t => {
-                    // remove helper prop
                     delete t._activityIndex;
+                    delete t.descNorm;
+                    delete t.description;
                     tradesToImport.push({
                         ticker: t.ticker,
                         type: t.type,
@@ -592,7 +592,7 @@ export default function App() {
                 });
 
             } else {
-                // Optionable / standard CSV import (legacy)
+                // Legacy optionable CSV
                 for (const vals of rows) {
                     const rowObj = {};
                     headers.forEach((h, idx) => rowObj[normalizeKey(h)] = vals[idx] || '');
@@ -613,26 +613,26 @@ export default function App() {
                 }
             }
 
-             // Import trades via API
-             const response = await fetch(`${API_URL}/trades/import`, {
-                 method: 'POST',
-                 headers: { 'Content-Type': 'application/json' },
-                 body: JSON.stringify({ trades: tradesToImport }),
-             });
+            // Import trades via API
+            const response = await fetch(`${API_URL}/trades/import`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ trades: tradesToImport }),
+            });
 
-             if (!response.ok) throw new Error('Failed to import trades');
+            if (!response.ok) throw new Error('Failed to import trades');
 
-             const result = await response.json();
-             await fetchTrades();
-             alert(`Successfully imported ${result.imported} trades!`);
-         } catch (err) {
-             console.error('Error importing CSV:', err);
-             setError('Failed to import CSV. Please check the file format.');
-         }
+            const result = await response.json();
+            await fetchTrades();
+            alert(`Successfully imported ${result.imported} trades!`);
+        } catch (err) {
+            console.error('Error importing CSV:', err);
+            setError('Failed to import CSV. Please check the file format.');
+        }
 
-         // Reset file input
-         event.target.value = '';
-     };
+        // Reset file input
+        event.target.value = '';
+    };
 
     // --- Aggregation Logic ---
     const stats = useMemo(() => {
