@@ -579,17 +579,18 @@ export default function App() {
             }
 
             // set preview and open editable modal (do not upload yet)
-            setImportPreview(parsedTrades);
-            setIsImportPreviewOpen(true);
-        } catch (err) {
-            console.error('Error parsing CSV:', err);
-            setError('Failed to parse CSV. Please check the file format.');
-            if (fileInputRef.current) fileInputRef.current.value = '';
-        }
-    };
+            // limit preview size to 250 rows to avoid huge previews
+            setImportPreview(parsedTrades.slice(0, 250));
+             setIsImportPreviewOpen(true);
+         } catch (err) {
+             console.error('Error parsing CSV:', err);
+             setError('Failed to parse CSV. Please check the file format.');
+             if (fileInputRef.current) fileInputRef.current.value = '';
+         }
+     };
 
-    // Editable preview helpers
-    const updateImportRow = (index, field, value) => {
+     // Editable preview helpers
+     const updateImportRow = (index, field, value) => {
         setImportPreview(prev => prev.map((r, i) => i === index ? { ...r, [field]: value } : r));
     };
     const removeImportRow = (index) => {
@@ -619,19 +620,27 @@ export default function App() {
     };
 
     const confirmImport = async () => {
-        if (!importPreview.length) {
-            setError('Nothing to import');
-            return;
-        }
-        try {
-            const response = await fetch(`${API_URL}/trades/import`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ trades: importPreview }),
-            });
-            if (!response.ok) throw new Error('Failed to import trades');
-            const result = await response.json();
-            await fetchTrades();
-            setIsImportPreviewOpen(false);
-            setImportPreview([]);
-            if
+         if (!importPreview.length) {
+             setError('Nothing to import');
+             return;
+         }
+         try {
+             const response = await fetch(`${API_URL}/trades/import`, {
+                 method: 'POST',
+                 headers: { 'Content-Type': 'application/json' },
+                 body: JSON.stringify({ trades: importPreview }),
+             });
+             if (!response.ok) throw new Error('Failed to import trades');
+             const result = await response.json();
+             await fetchTrades();
+             setIsImportPreviewOpen(false);
+             setImportPreview([]);
+             // reset file input and filename so user can re-use control
+             if (fileInputRef.current) fileInputRef.current.value = '';
+            setImportFileName('');
+            setError(null);
+         } catch (err) {
+             console.error('Error importing trades:', err);
+             setError('Failed to import trades. Please try again.');
+         }
+     };
