@@ -98,7 +98,7 @@ export default function App() {
     const [trades, setTrades] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
-    const [importFormat, setImportFormat] = useState('auto'); // 'auto' | 'optionable' | 'activity'
+    const [importFormat, setImportFormat] = useState('auto'); // 'auto' | 'optionable-default' | 'Robinhood'
     const [importPreview, setImportPreview] = useState([]); // trades parsed and ready to preview
     const [isImportPreviewOpen, setIsImportPreviewOpen] = useState(false);
     const [importFileName, setImportFileName] = useState('');
@@ -670,8 +670,8 @@ export default function App() {
                         className="border px-2 py-1 rounded"
                     >
                         <option value="auto">Auto</option>
-                        <option value="optionable">Optionable</option>
-                        <option value="activity">Activity</option>
+                        <option value="optionable">Optionable-Default</option>
+                        <option value="activity">Robinhood</option>
                     </select>
                     <button
                         onClick={() => fileInputRef.current && fileInputRef.current.click()}
