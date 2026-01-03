@@ -4,7 +4,7 @@ services:
     image: yomikoye/optionable:latest
     pull_policy: always
     environment:
-      - TZ=Europe/Warsaw
+      - TZ=America/Chicago
       - NODE_ENV=production
       - DATA_DIR=/data
     volumes:
