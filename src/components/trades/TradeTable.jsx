@@ -1,18 +1,19 @@
-import React from 'react';
+import React, { useState, useMemo } from 'react';
 import {
     Calendar,
     ChevronLeft,
     ChevronRight,
+    ChevronDown,
     X,
     Link2,
     Check,
     RefreshCw,
-    Copy,
     Edit2,
     Trash2,
     ArrowUpDown,
     ArrowUp,
-    ArrowDown
+    ArrowDown,
+    PlusCircle
 } from 'lucide-react';
 import { formatDateShort, formatCurrency, formatPercent } from '../../utils/formatters';
 import { calculateDTE, calculateMetrics } from '../../utils/calculations';
@@ -27,21 +28,99 @@ const STATUS_TABS = [
 export const TradeTable = ({
     trades,
     filteredAndSortedTrades,
-    paginatedTrades,
-    chainInfo,
     statusFilter,
     setStatusFilter,
     sortConfig,
     setSortConfig,
     currentPage,
     setCurrentPage,
-    totalPages,
     onQuickClose,
     onRoll,
-    onDuplicate,
     onEdit,
-    onDelete
+    onDelete,
+    onOpenCC
 }) => {
+    const [expandedChains, setExpandedChains] = useState(new Set());
+
+    // Build chains from trades - group related trades together
+    const chainedTrades = useMemo(() => {
+        // Find all chain roots (trades without parent)
+        const roots = filteredAndSortedTrades.filter(t => !t.parentTradeId);
+        const tradesById = new Map(filteredAndSortedTrades.map(t => [t.id, t]));
+
+        // Build chain for each root
+        const chains = [];
+        const processedIds = new Set();
+
+        for (const root of roots) {
+            if (processedIds.has(root.id)) continue;
+
+            const chain = [root];
+            processedIds.add(root.id);
+
+            // Follow the chain forward
+            let currentId = root.id;
+            let child = filteredAndSortedTrades.find(t => t.parentTradeId === currentId);
+            while (child && !processedIds.has(child.id)) {
+                chain.push(child);
+                processedIds.add(child.id);
+                currentId = child.id;
+                child = filteredAndSortedTrades.find(t => t.parentTradeId === currentId);
+            }
+
+            // Calculate chain totals
+            const chainPnL = chain.reduce((sum, t) => sum + calculateMetrics(t).pnl, 0);
+            const lastTrade = chain[chain.length - 1];
+
+            chains.push({
+                id: root.id,
+                root,
+                trades: chain,
+                chainPnL,
+                isMultiTrade: chain.length > 1,
+                finalStatus: lastTrade.status
+            });
+        }
+
+        // Add any orphaned trades (shouldn't happen normally)
+        for (const trade of filteredAndSortedTrades) {
+            if (!processedIds.has(trade.id)) {
+                chains.push({
+                    id: trade.id,
+                    root: trade,
+                    trades: [trade],
+                    chainPnL: calculateMetrics(trade).pnl,
+                    isMultiTrade: false,
+                    finalStatus: trade.status
+                });
+            }
+        }
+
+        // Sort chains by most recent opened date (newest first)
+        chains.sort((a, b) => new Date(b.root.openedDate) - new Date(a.root.openedDate));
+
+        return chains;
+    }, [filteredAndSortedTrades]);
+
+    // Paginate chains
+    const totalChainPages = Math.ceil(chainedTrades.length / TRADES_PER_PAGE);
+    const paginatedChains = chainedTrades.slice(
+        (currentPage - 1) * TRADES_PER_PAGE,
+        currentPage * TRADES_PER_PAGE
+    );
+
+    const toggleChain = (chainId) => {
+        setExpandedChains(prev => {
+            const next = new Set(prev);
+            if (next.has(chainId)) {
+                next.delete(chainId);
+            } else {
+                next.add(chainId);
+            }
+            return next;
+        });
+    };
+
     const handleSort = (key) => {
         setSortConfig(prev => ({
             key,
@@ -98,15 +177,15 @@ export const TradeTable = ({
                         </button>
                     )}
                     <span className="text-xs text-slate-400 font-mono bg-slate-100 dark:bg-slate-700 px-2 py-1 rounded">
-                        {filteredAndSortedTrades.length} trades
+                        {chainedTrades.length} chains · {filteredAndSortedTrades.length} trades
                     </span>
                 </div>
             </div>
 
             {/* Table */}
-            <div className="overflow-x-auto max-h-[600px]">
+            <div className="overflow-x-auto">
                 <table className="w-full text-sm text-left">
-                    <thead className="text-xs text-slate-500 dark:text-slate-400 uppercase bg-slate-50 dark:bg-slate-800 border-b border-slate-100 dark:border-slate-700 sticky top-0 z-10">
+                    <thead className="text-xs text-slate-500 dark:text-slate-400 uppercase bg-slate-50 dark:bg-slate-800 border-b border-slate-100 dark:border-slate-700">
                         <tr>
                             <th className="px-3 py-2 font-semibold cursor-pointer hover:text-slate-700 dark:hover:text-slate-200" onClick={() => handleSort('ticker')}>
                                 <span className="inline-flex items-center gap-1">Ticker {getSortIcon('ticker')}</span>
@@ -135,124 +214,229 @@ export const TradeTable = ({
                         </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
-                        {filteredAndSortedTrades.length === 0 ? (
+                        {paginatedChains.length === 0 ? (
                             <tr>
                                 <td colSpan="12" className="px-4 py-12 text-center text-sm text-slate-400">
                                     {trades.length === 0 ? "No trades yet. Click \"New Trade\" to start your wheel." : "No trades match the current filter."}
                                 </td>
                             </tr>
                         ) : (
-                            paginatedTrades.map((trade) => {
-                                const metrics = calculateMetrics(trade);
-                                const dte = calculateDTE(trade.expirationDate, trade.status);
-                                const hasChild = chainInfo.parentToChild.has(trade.id);
-                                const hasParent = chainInfo.childToParent.has(trade.id);
-                                const isPartOfChain = hasChild || hasParent;
+                            paginatedChains.map((chain) => {
+                                const isExpanded = expandedChains.has(chain.id);
+                                const rootTrade = chain.root;
+                                const rootMetrics = calculateMetrics(rootTrade);
+                                const rootDte = calculateDTE(rootTrade.expirationDate, rootTrade.status);
+
                                 return (
-                                    <tr key={trade.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-700/50 transition-colors">
-                                        <td className="px-3 py-2 text-sm font-semibold text-slate-700 dark:text-slate-200">
-                                            <div className="flex items-center gap-1">
-                                                {trade.ticker.toUpperCase()}
-                                                {isPartOfChain && (
-                                                    <Link2
-                                                        className="w-3 h-3 text-amber-500"
-                                                        title={hasParent ? "Rolled from previous" : "Rolled to next"}
-                                                    />
-                                                )}
-                                            </div>
-                                        </td>
-                                        <td className="px-3 py-2">
-                                            <span className={`px-2 py-0.5 rounded text-xs font-semibold ${trade.type === 'CSP'
-                                                ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-400'
-                                                : 'bg-purple-100 dark:bg-purple-900/40 text-purple-700 dark:text-purple-400'
-                                            }`}>
-                                                {trade.type}
-                                            </span>
-                                        </td>
-                                        <td className="px-3 py-2 font-mono text-sm text-slate-600 dark:text-slate-300">${trade.strike}</td>
-                                        <td className="px-3 py-2 text-center font-mono text-sm text-slate-600 dark:text-slate-300">{trade.quantity}</td>
-                                        <td className="px-3 py-2 text-center font-mono text-sm text-slate-500 dark:text-slate-400">
-                                            {trade.delta ? trade.delta.toFixed(2) : '—'}
-                                        </td>
-                                        <td className="px-3 py-2 text-sm text-slate-500 dark:text-slate-400">
-                                            {formatDateShort(trade.openedDate)}
-                                        </td>
-                                        <td className="px-3 py-2 text-sm text-slate-500 dark:text-slate-400">
-                                            {formatDateShort(trade.expirationDate)}
-                                        </td>
-                                        <td className="px-3 py-2 text-center">
-                                            {dte !== null ? (
-                                                <span className={`font-mono text-sm font-medium ${dte <= 3 ? 'text-red-600 dark:text-red-400' :
-                                                    dte <= 7 ? 'text-orange-600 dark:text-orange-400' :
-                                                        'text-slate-600 dark:text-slate-300'
+                                    <React.Fragment key={chain.id}>
+                                        {/* Root/Main Trade Row */}
+                                        <tr className={`hover:bg-slate-50/80 dark:hover:bg-slate-700/50 transition-colors ${chain.isMultiTrade ? 'bg-slate-25 dark:bg-slate-800/80' : ''}`}>
+                                            <td className="px-3 py-2 text-sm text-slate-700 dark:text-slate-200">
+                                                <div className="flex items-center gap-1">
+                                                    {chain.isMultiTrade && (
+                                                        <button
+                                                            onClick={() => toggleChain(chain.id)}
+                                                            className="p-0.5 hover:bg-slate-200 dark:hover:bg-slate-600 rounded mr-1"
+                                                        >
+                                                            {isExpanded ? (
+                                                                <ChevronDown className="w-4 h-4 text-slate-500" />
+                                                            ) : (
+                                                                <ChevronRight className="w-4 h-4 text-slate-500" />
+                                                            )}
+                                                        </button>
+                                                    )}
+                                                    {rootTrade.ticker.toUpperCase()}
+                                                    {chain.isMultiTrade && (
+                                                        <span className="ml-1 px-1.5 py-0.5 text-[10px] font-medium bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-400 rounded">
+                                                            {chain.trades.length}
+                                                        </span>
+                                                    )}
+                                                </div>
+                                            </td>
+                                            <td className="px-3 py-2">
+                                                <span className={`px-2 py-0.5 rounded text-xs font-semibold ${rootTrade.type === 'CSP'
+                                                    ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-400'
+                                                    : 'bg-purple-100 dark:bg-purple-900/40 text-purple-700 dark:text-purple-400'
                                                 }`}>
-                                                    {dte}d
+                                                    {rootTrade.type}
                                                 </span>
-                                            ) : (
-                                                <span className="text-slate-300 dark:text-slate-600 text-sm">—</span>
-                                            )}
-                                        </td>
-                                        <td className={`px-3 py-2 text-right font-mono text-sm font-medium ${metrics.pnl >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-500 dark:text-red-400'}`}>
-                                            {formatCurrency(metrics.pnl)}
-                                        </td>
-                                        <td className={`px-3 py-2 text-right font-mono text-sm ${metrics.roi >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-500 dark:text-red-400'}`}>
-                                            {formatPercent(metrics.roi)}
-                                        </td>
-                                        <td className="px-3 py-2 text-center">
-                                            <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
-                                                trade.status === 'Open' ? 'bg-amber-50 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 ring-1 ring-inset ring-amber-600/20' :
-                                                trade.status === 'Assigned' ? 'bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-300 ring-1 ring-inset ring-slate-600/20' :
-                                                trade.status === 'Expired' ? 'bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 ring-1 ring-inset ring-emerald-600/20' :
-                                                trade.status === 'Rolled' ? 'bg-slate-50 dark:bg-slate-700/50 text-slate-600 dark:text-slate-400 ring-1 ring-inset ring-slate-500/20' :
-                                                'bg-slate-50 dark:bg-slate-700/50 text-slate-500 dark:text-slate-400'
-                                            }`}>
-                                                {trade.status}
-                                            </span>
-                                        </td>
-                                        <td className="px-3 py-2 text-right">
-                                            <div className="flex justify-end gap-1">
-                                                {trade.status === 'Open' && (
-                                                    <>
-                                                        <button
-                                                            onClick={() => onQuickClose(trade)}
-                                                            className="p-1.5 text-slate-400 hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-900/30 rounded"
-                                                            title="Close at $0 (expired)"
-                                                        >
-                                                            <Check className="w-4 h-4" />
-                                                        </button>
-                                                        <button
-                                                            onClick={() => onRoll(trade)}
-                                                            className="p-1.5 text-slate-400 hover:text-amber-600 dark:hover:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-900/30 rounded"
-                                                            title="Roll trade"
-                                                        >
-                                                            <RefreshCw className="w-4 h-4" />
-                                                        </button>
-                                                    </>
+                                            </td>
+                                            <td className="px-3 py-2 font-mono text-sm text-slate-600 dark:text-slate-300">${rootTrade.strike}</td>
+                                            <td className="px-3 py-2 text-center font-mono text-sm text-slate-600 dark:text-slate-300">{rootTrade.quantity}</td>
+                                            <td className="px-3 py-2 text-center font-mono text-sm text-slate-500 dark:text-slate-400">
+                                                {rootTrade.delta ? rootTrade.delta.toFixed(2) : '—'}
+                                            </td>
+                                            <td className="px-3 py-2 text-sm text-slate-500 dark:text-slate-400">
+                                                {formatDateShort(rootTrade.openedDate)}
+                                            </td>
+                                            <td className="px-3 py-2 text-sm text-slate-500 dark:text-slate-400">
+                                                {formatDateShort(rootTrade.expirationDate)}
+                                            </td>
+                                            <td className="px-3 py-2 text-center">
+                                                {rootDte !== null ? (
+                                                    <span className={`font-mono text-sm font-medium ${rootDte <= 3 ? 'text-red-600 dark:text-red-400' :
+                                                        rootDte <= 7 ? 'text-orange-600 dark:text-orange-400' :
+                                                            'text-slate-600 dark:text-slate-300'
+                                                    }`}>
+                                                        {rootDte}d
+                                                    </span>
+                                                ) : (
+                                                    <span className="text-slate-300 dark:text-slate-600 text-sm">—</span>
                                                 )}
-                                                <button
-                                                    onClick={() => onDuplicate(trade)}
-                                                    className="p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 rounded"
-                                                    title="Duplicate trade"
-                                                >
-                                                    <Copy className="w-4 h-4" />
-                                                </button>
-                                                <button
-                                                    onClick={() => onEdit(trade)}
-                                                    className="p-1.5 text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 rounded"
-                                                    title="Edit trade"
-                                                >
-                                                    <Edit2 className="w-4 h-4" />
-                                                </button>
-                                                <button
-                                                    onClick={() => onDelete(trade.id)}
-                                                    className="p-1.5 text-slate-400 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30 rounded"
-                                                    title="Delete trade"
-                                                >
-                                                    <Trash2 className="w-4 h-4" />
-                                                </button>
-                                            </div>
-                                        </td>
-                                    </tr>
+                                            </td>
+                                            <td className={`px-3 py-2 text-right font-mono text-sm font-medium ${chain.chainPnL >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-500 dark:text-red-400'}`}>
+                                                {formatCurrency(chain.chainPnL)}
+                                                {chain.isMultiTrade && (
+                                                    <span className="block text-[10px] text-slate-400 font-normal">chain total</span>
+                                                )}
+                                            </td>
+                                            <td className={`px-3 py-2 text-right font-mono text-sm ${rootMetrics.roi >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-500 dark:text-red-400'}`}>
+                                                {formatPercent(rootMetrics.roi)}
+                                            </td>
+                                            <td className="px-3 py-2 text-center">
+                                                <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
+                                                    chain.finalStatus === 'Open' ? 'bg-amber-50 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 ring-1 ring-inset ring-amber-600/20' :
+                                                    chain.finalStatus === 'Assigned' ? 'bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-300 ring-1 ring-inset ring-slate-600/20' :
+                                                    chain.finalStatus === 'Expired' ? 'bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 ring-1 ring-inset ring-emerald-600/20' :
+                                                    chain.finalStatus === 'Rolled' ? 'bg-slate-50 dark:bg-slate-700/50 text-slate-600 dark:text-slate-400 ring-1 ring-inset ring-slate-500/20' :
+                                                    'bg-slate-50 dark:bg-slate-700/50 text-slate-500 dark:text-slate-400'
+                                                }`}>
+                                                    {chain.finalStatus}
+                                                </span>
+                                            </td>
+                                            <td className="px-3 py-2 text-right">
+                                                <div className="flex justify-end gap-1">
+                                                    {/* Open CC button - shown when CSP is assigned */}
+                                                    {chain.finalStatus === 'Assigned' && rootTrade.type === 'CSP' && onOpenCC && (
+                                                        <button
+                                                            onClick={() => onOpenCC(rootTrade)}
+                                                            className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-purple-600 dark:text-purple-400 hover:bg-purple-50 dark:hover:bg-purple-900/30 rounded transition-colors"
+                                                            title="Sell a call on your assigned shares"
+                                                        >
+                                                            <PlusCircle className="w-3.5 h-3.5" />
+                                                            <span>Sell CC</span>
+                                                        </button>
+                                                    )}
+                                                    {chain.finalStatus === 'Open' && (
+                                                        <>
+                                                            <button
+                                                                onClick={() => onQuickClose(chain.trades[chain.trades.length - 1])}
+                                                                className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-slate-500 dark:text-slate-400 hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-900/30 rounded transition-colors"
+                                                                title="Mark as expired worthless"
+                                                            >
+                                                                <Check className="w-3.5 h-3.5" />
+                                                                <span>Expire</span>
+                                                            </button>
+                                                            <button
+                                                                onClick={() => onRoll(chain.trades[chain.trades.length - 1])}
+                                                                className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-slate-500 dark:text-slate-400 hover:text-amber-600 dark:hover:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-900/30 rounded transition-colors"
+                                                                title="Close and open new position"
+                                                            >
+                                                                <RefreshCw className="w-3.5 h-3.5" />
+                                                                <span>Roll</span>
+                                                            </button>
+                                                        </>
+                                                    )}
+                                                    <button
+                                                        onClick={() => onEdit(rootTrade)}
+                                                        className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-slate-500 dark:text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 rounded transition-colors"
+                                                        title="Modify trade details"
+                                                    >
+                                                        <Edit2 className="w-3.5 h-3.5" />
+                                                        <span>Edit</span>
+                                                    </button>
+                                                    <button
+                                                        onClick={() => onDelete(rootTrade.id)}
+                                                        className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-slate-500 dark:text-slate-400 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30 rounded transition-colors"
+                                                        title="Remove this trade"
+                                                    >
+                                                        <Trash2 className="w-3.5 h-3.5" />
+                                                        <span>Delete</span>
+                                                    </button>
+                                                </div>
+                                            </td>
+                                        </tr>
+
+                                        {/* Child Trade Rows (when expanded) */}
+                                        {isExpanded && chain.trades.slice(1).map((trade, idx) => {
+                                            const metrics = calculateMetrics(trade);
+                                            const dte = calculateDTE(trade.expirationDate, trade.status);
+                                            return (
+                                                <tr key={trade.id} className="bg-slate-50/50 dark:bg-slate-700/30 hover:bg-slate-100/50 dark:hover:bg-slate-700/50 transition-colors">
+                                                    <td className="px-3 py-2 text-sm text-slate-600 dark:text-slate-300">
+                                                        <div className="flex items-center gap-1 pl-6">
+                                                            <span className="text-slate-300 dark:text-slate-600 mr-1">└</span>
+                                                            <Link2 className="w-3 h-3 text-amber-500" />
+                                                            <span className="text-slate-500">Roll #{idx + 1}</span>
+                                                        </div>
+                                                    </td>
+                                                    <td className="px-3 py-2">
+                                                        <span className={`px-2 py-0.5 rounded text-xs font-semibold ${trade.type === 'CSP'
+                                                            ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-400'
+                                                            : 'bg-purple-100 dark:bg-purple-900/40 text-purple-700 dark:text-purple-400'
+                                                        }`}>
+                                                            {trade.type}
+                                                        </span>
+                                                    </td>
+                                                    <td className="px-3 py-2 font-mono text-sm text-slate-500 dark:text-slate-400">${trade.strike}</td>
+                                                    <td className="px-3 py-2 text-center font-mono text-sm text-slate-500 dark:text-slate-400">{trade.quantity}</td>
+                                                    <td className="px-3 py-2 text-center font-mono text-sm text-slate-400 dark:text-slate-500">
+                                                        {trade.delta ? trade.delta.toFixed(2) : '—'}
+                                                    </td>
+                                                    <td className="px-3 py-2 text-sm text-slate-400 dark:text-slate-500">
+                                                        {formatDateShort(trade.openedDate)}
+                                                    </td>
+                                                    <td className="px-3 py-2 text-sm text-slate-400 dark:text-slate-500">
+                                                        {formatDateShort(trade.expirationDate)}
+                                                    </td>
+                                                    <td className="px-3 py-2 text-center">
+                                                        {dte !== null ? (
+                                                            <span className={`font-mono text-sm ${dte <= 3 ? 'text-red-500' : dte <= 7 ? 'text-orange-500' : 'text-slate-500'}`}>
+                                                                {dte}d
+                                                            </span>
+                                                        ) : (
+                                                            <span className="text-slate-300 dark:text-slate-600 text-sm">—</span>
+                                                        )}
+                                                    </td>
+                                                    <td className={`px-3 py-2 text-right font-mono text-sm ${metrics.pnl >= 0 ? 'text-emerald-500' : 'text-red-400'}`}>
+                                                        {formatCurrency(metrics.pnl)}
+                                                    </td>
+                                                    <td className={`px-3 py-2 text-right font-mono text-sm ${metrics.roi >= 0 ? 'text-emerald-500' : 'text-red-400'}`}>
+                                                        {formatPercent(metrics.roi)}
+                                                    </td>
+                                                    <td className="px-3 py-2 text-center">
+                                                        <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
+                                                            trade.status === 'Open' ? 'bg-amber-50 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400' :
+                                                            trade.status === 'Assigned' ? 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-400' :
+                                                            trade.status === 'Expired' ? 'bg-emerald-50 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400' :
+                                                            trade.status === 'Rolled' ? 'bg-slate-50 dark:bg-slate-700/50 text-slate-500' :
+                                                            'bg-slate-50 dark:bg-slate-700/50 text-slate-400'
+                                                        }`}>
+                                                            {trade.status}
+                                                        </span>
+                                                    </td>
+                                                    <td className="px-3 py-2 text-right">
+                                                        <div className="flex justify-end gap-1">
+                                                            <button
+                                                                onClick={() => onEdit(trade)}
+                                                                className="p-1.5 text-slate-400 hover:text-indigo-500 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 rounded"
+                                                                title="Edit trade"
+                                                            >
+                                                                <Edit2 className="w-3.5 h-3.5" />
+                                                            </button>
+                                                            <button
+                                                                onClick={() => onDelete(trade.id)}
+                                                                className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 rounded"
+                                                                title="Delete trade"
+                                                            >
+                                                                <Trash2 className="w-3.5 h-3.5" />
+                                                            </button>
+                                                        </div>
+                                                    </td>
+                                                </tr>
+                                            );
+                                        })}
+                                    </React.Fragment>
                                 );
                             })
                         )}
@@ -261,10 +445,10 @@ export const TradeTable = ({
             </div>
 
             {/* Pagination */}
-            {totalPages > 1 && (
+            {totalChainPages > 1 && (
                 <div className="p-4 border-t border-slate-100 dark:border-slate-700 flex items-center justify-between bg-slate-50/50 dark:bg-slate-800/50">
                     <div className="text-sm text-slate-500 dark:text-slate-400">
-                        Showing {((currentPage - 1) * TRADES_PER_PAGE) + 1} - {Math.min(currentPage * TRADES_PER_PAGE, filteredAndSortedTrades.length)} of {filteredAndSortedTrades.length}
+                        Showing {((currentPage - 1) * TRADES_PER_PAGE) + 1} - {Math.min(currentPage * TRADES_PER_PAGE, chainedTrades.length)} of {chainedTrades.length} chains
                     </div>
                     <div className="flex items-center gap-2">
                         <button
@@ -275,7 +459,7 @@ export const TradeTable = ({
                             <ChevronLeft className="w-4 h-4" />
                         </button>
                         <div className="flex items-center gap-1">
-                            {Array.from({ length: totalPages }, (_, i) => i + 1).map(page => (
+                            {Array.from({ length: totalChainPages }, (_, i) => i + 1).map(page => (
                                 <button
                                     key={page}
                                     onClick={() => setCurrentPage(page)}
@@ -289,8 +473,8 @@ export const TradeTable = ({
                             ))}
                         </div>
                         <button
-                            onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
-                            disabled={currentPage === totalPages}
+                            onClick={() => setCurrentPage(p => Math.min(totalChainPages, p + 1))}
+                            disabled={currentPage === totalChainPages}
                             className="p-2 rounded-lg border border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed"
                         >
                             <ChevronRight className="w-4 h-4" />

@@ -2,7 +2,7 @@
 export const API_URL = '/api';
 
 // Pagination
-export const TRADES_PER_PAGE = 10;
+export const TRADES_PER_PAGE = 5;
 
 // Status values
 export const STATUS = {

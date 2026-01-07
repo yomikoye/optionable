@@ -3,38 +3,105 @@
 ## Project Overview
 Wheel Strategy Tracker for Cash Secured Puts (CSPs) and Covered Calls (CCs).
 
-**Current Version:** 0.5.0
+**Current Version:** 0.6.0
 **Docker:** `yomikoye/optionable:latest`
 
 ---
 
-## Architecture (v0.5.0)
+## Architecture (v0.6.0)
 
 ```
 src/
 ├── App.jsx                     # Main app (~950 lines, includes TradeModal)
 ├── components/
-│   ├── ui/Toast.jsx            # Toast notifications
+│   ├── ui/
+│   │   ├── Toast.jsx           # Toast notifications
+│   │   └── WelcomeModal.jsx    # First-time user onboarding
 │   ├── layout/Header.jsx       # App header with actions
 │   ├── dashboard/
-│   │   ├── Dashboard.jsx       # KPI cards grid
+│   │   ├── Dashboard.jsx       # KPI cards (6 metrics)
 │   │   └── SummaryCards.jsx    # Monthly P/L, Ticker P/L, Tips
 │   ├── chart/PnLChart.jsx      # Cumulative P/L chart
-│   └── trades/TradeTable.jsx   # Trade log with sorting/filtering
+│   ├── trades/TradeTable.jsx   # Trade log with chain grouping
+│   ├── positions/PositionsTable.jsx  # Stock positions tracking
+│   └── settings/SettingsModal.jsx    # App settings (live prices toggle)
 ├── hooks/
 │   ├── useToast.js             # Toast notification hook
 │   ├── useTheme.js             # Dark mode toggle
 │   └── useTrades.js            # Trade CRUD operations
 ├── services/api.js             # API service layer
 ├── utils/
-│   ├── constants.js            # API_URL, TRADES_PER_PAGE
+│   ├── constants.js            # API_URL, TRADES_PER_PAGE (5)
 │   ├── formatters.js           # formatCurrency, formatDate, etc.
 │   └── calculations.js         # calculateMetrics, calculateDTE
-└── index.css                   # Tailwind styles
+└── index.css                   # Tailwind styles + JetBrains Mono
 ```
 
 **Backend:** Express + better-sqlite3
-**API:** `/api/trades`, `/api/stats`, `/api/health`
+**API:** `/api/trades`, `/api/positions`, `/api/stats`, `/api/settings`, `/api/prices`, `/api/health`
+
+---
+
+## Database Schema
+
+### trades
+```sql
+CREATE TABLE trades (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  ticker TEXT NOT NULL,
+  type TEXT NOT NULL,              -- 'CSP' or 'CC'
+  strike REAL NOT NULL,
+  quantity INTEGER DEFAULT 1,
+  delta REAL,
+  entryPrice REAL NOT NULL,
+  closePrice REAL DEFAULT 0,
+  openedDate TEXT NOT NULL,
+  expirationDate TEXT NOT NULL,
+  closedDate TEXT,
+  status TEXT DEFAULT 'Open',      -- Open, Expired, Assigned, Closed, Rolled
+  parentTradeId INTEGER,           -- Links rolled/chained trades
+  createdAt TEXT DEFAULT CURRENT_TIMESTAMP,
+  updatedAt TEXT DEFAULT CURRENT_TIMESTAMP
+);
+```
+
+### positions
+```sql
+CREATE TABLE positions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  ticker TEXT NOT NULL,
+  shares INTEGER NOT NULL,
+  costBasis REAL NOT NULL,
+  acquiredDate TEXT NOT NULL,
+  acquiredFromTradeId INTEGER,     -- CSP trade that was assigned
+  soldDate TEXT,
+  salePrice REAL,
+  soldViaTradeId INTEGER,          -- CC trade that was assigned
+  capitalGainLoss REAL,
+  createdAt TEXT DEFAULT CURRENT_TIMESTAMP,
+  updatedAt TEXT DEFAULT CURRENT_TIMESTAMP
+);
+```
+
+### price_cache
+```sql
+CREATE TABLE price_cache (
+  ticker TEXT PRIMARY KEY,
+  price REAL NOT NULL,
+  change REAL,
+  changePercent REAL,
+  updatedAt TEXT DEFAULT CURRENT_TIMESTAMP
+);
+```
+
+### settings
+```sql
+CREATE TABLE settings (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL,
+  updatedAt TEXT DEFAULT CURRENT_TIMESTAMP
+);
+```
 
 ---
 
@@ -56,96 +123,70 @@ docker buildx build --platform linux/amd64,linux/arm64 \
 
 ### Release Process
 1. Update version in `package.json`
-2. Update version fallback in `server.js` (line ~205)
-3. Commit changes
-4. Build & push Docker
-5. Push to GitHub
+2. Update version fallback in `server.js`
+3. Update version badges in README.md
+4. Commit changes
+5. Build & push Docker
+6. Push to GitHub
 
 ---
 
-## Roadmap
+## Features (v0.6.0)
 
-### v0.6.0 - Capital Gain/Loss Tracking (GitHub Issue #2)
+### Dashboard KPIs (synced with chart time filter)
+1. **Premium Collected** - Net premium from closed trades
+2. **Avg ROI** - Average return on collateral
+3. **Win Rate** - Percentage of profitable chains
+4. **Stock Gains** - Realized capital gains from positions
+5. **Total P/L** - Premiums + Stock Gains combined
+6. **Deployed Capital** - Collateral locked in open trades
 
-**Problem:**
-When assigned on a CSP, you acquire shares. When those shares are sold (via CC assignment or manual sale), there's a capital gain/loss that isn't currently tracked.
+### Trade Chains
+- Rolled trades linked via `parentTradeId`
+- CSP→CC sequences auto-linked when CC opened on assigned shares
+- Collapsible chain view in trade table
+- Chain P/L aggregated and displayed
 
-**Example:**
-```
-1. Sell CSP AAPL $150 strike → collect $3 premium → ASSIGNED
-   → Acquired 100 shares at $150 (cost basis: $15,000)
+### Keyboard Shortcuts
+- `N` - New trade
+- `P` - Positions modal
+- `S` - Settings modal
+- `H` - Help/welcome modal
+- `D` - Toggle dark mode
+- `Esc` - Close any modal
 
-2. Sell CC AAPL $160 strike → collect $2 premium → ASSIGNED
-   → Sold 100 shares at $160 (proceeds: $16,000)
-
-Currently tracked:  $300 + $200 = $500 (premium only)
-Missing:            $16,000 - $15,000 = $1,000 (stock gain)
-Total real P/L:     $1,500
-```
-
-**Design:**
-
-#### Database Schema Addition
-```sql
--- Track share positions acquired through assignments
-CREATE TABLE positions (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  ticker TEXT NOT NULL,
-  shares INTEGER NOT NULL,           -- Number of shares (100 per contract)
-  costBasis REAL NOT NULL,           -- Price per share when acquired
-  acquiredDate TEXT NOT NULL,        -- Date of CSP assignment
-  acquiredFromTradeId INTEGER,       -- Link to the CSP trade that was assigned
-  soldDate TEXT,                     -- Date shares were sold (NULL if still held)
-  salePrice REAL,                    -- Price per share when sold
-  soldViaTradeId INTEGER,            -- Link to CC trade if assigned, NULL if manual sale
-  capitalGainLoss REAL,              -- (salePrice - costBasis) * shares
-  createdAt TEXT DEFAULT CURRENT_TIMESTAMP,
-  updatedAt TEXT DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE INDEX idx_positions_ticker ON positions(ticker);
-CREATE INDEX idx_positions_soldDate ON positions(soldDate);
-```
-
-#### Workflow
-1. **CSP Assignment** → Auto-create position record with cost basis = strike price
-2. **CC Assignment** → Match against open position (FIFO), record sale price = strike, calculate gain/loss
-3. **Manual Sale** → UI to close position at custom price
-
-#### API Endpoints
-```
-GET    /api/positions              # List all positions (open and closed)
-GET    /api/positions?status=open  # Open positions only
-POST   /api/positions              # Manual position entry
-PUT    /api/positions/:id          # Close position (manual sale)
-GET    /api/positions/summary      # Total unrealized/realized gains
-```
-
-#### UI Changes
-1. New "Positions" tab or section showing:
-   - Open positions (ticker, shares, cost basis, current value, unrealized G/L)
-   - Closed positions (ticker, shares, cost basis, sale price, realized G/L)
-2. Dashboard additions:
-   - Total Realized Capital Gains
-   - Total Unrealized Capital Gains
-   - Combined P/L (Premium + Capital Gains)
-3. When marking trade as "Assigned":
-   - CSP → Prompt to confirm share acquisition
-   - CC → Prompt to select which lot to sell (if multiple)
-
-#### Implementation Steps
-- [ ] Add positions table migration
-- [ ] Create positions API endpoints
-- [ ] Auto-create position on CSP assignment
-- [ ] Auto-close position on CC assignment (FIFO)
-- [ ] Add positions UI (list, summary)
-- [ ] Update dashboard with capital gains metrics
-- [ ] Add manual position close flow
-- [ ] Update stats aggregations
+### Seed Data (fresh install)
+1. AAPL CSP - Expired (simple put)
+2. MSFT CC - Expired (simple call)
+3. META CSP chain - Rolled to new CSP
+4. NVDA full wheel - CSP assigned → CC assigned ($1,000 realized gain)
 
 ---
 
-### Future Ideas
+## v0.6.0 Implementation Status
+
+- [x] Add positions table migration
+- [x] Add price_cache table
+- [x] Add settings table (live_prices_enabled)
+- [x] Create positions API endpoints
+- [x] Create /api/prices/:ticker endpoint (proxy with caching)
+- [x] Auto-create position on CSP assignment
+- [x] Auto-close position on CC assignment
+- [x] Add positions UI (PositionsTable)
+- [x] Add settings UI (SettingsModal with toggle)
+- [x] Update dashboard with capital gains metrics
+- [x] Add manual position close flow
+- [x] Update stats aggregations
+- [x] Trade chain grouping in UI
+- [x] Dashboard/chart time period sync
+- [x] Welcome modal for first-time users
+- [x] Keyboard shortcuts (N, P, S, H, D, Esc)
+- [x] Fix delete with FK constraints
+- [x] Pagination (5 chains per page)
+
+---
+
+## Future Ideas
 
 - **Brokerage Import** - Import trades from TD Ameritrade, Schwab CSV
 - **Target Allocation** - Set target capital per ticker, track usage
@@ -160,9 +201,12 @@ GET    /api/positions/summary      # Total unrealized/realized gains
 
 | File | Purpose |
 |------|---------|
-| `server.js` | Express API, SQLite database, all endpoints |
+| `server.js` | Express API, SQLite database, all endpoints, seed data |
 | `src/App.jsx` | Main React app, state management, TradeModal |
-| `src/components/trades/TradeTable.jsx` | Trade log with sorting/filtering |
+| `src/components/trades/TradeTable.jsx` | Trade log with chain grouping |
+| `src/components/positions/PositionsTable.jsx` | Stock positions tracking |
+| `src/components/settings/SettingsModal.jsx` | Settings with live prices toggle |
+| `src/components/ui/WelcomeModal.jsx` | First-time user onboarding |
 | `src/utils/calculations.js` | P/L calculations, metrics |
 | `Dockerfile` | Multi-stage build for production |
 | `docker-compose.yml` | Homelab deployment config |

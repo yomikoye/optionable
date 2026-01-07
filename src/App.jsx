@@ -9,11 +9,14 @@ import { calculateMetrics, calculateDaysHeld } from './utils/calculations';
 // Components
 import {
     Toast,
+    WelcomeModal,
     Header,
     Dashboard,
     PnLChart,
     TradeTable,
-    SummaryCards
+    SummaryCards,
+    PositionsTable,
+    SettingsModal
 } from './components';
 
 // --- Main Component ---
@@ -24,6 +27,9 @@ export default function App() {
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [editingId, setEditingId] = useState(null);
     const [currentPage, setCurrentPage] = useState(1);
+    const [showPositions, setShowPositions] = useState(false);
+    const [showSettings, setShowSettings] = useState(false);
+    const [showHelp, setShowHelp] = useState(false);
 
     // Form State
     const initialFormState = {
@@ -50,6 +56,13 @@ export default function App() {
     const [sortConfig, setSortConfig] = useState({ key: null, direction: 'desc' });
     const [chartPeriod, setChartPeriod] = useState('all'); // '1m', '3m', '6m', 'ytd', 'all'
 
+    // Capital gains stats from API
+    const [capitalGainsStats, setCapitalGainsStats] = useState({
+        realizedCapitalGL: 0,
+        openPositions: 0,
+        closedPositions: 0
+    });
+
     // Toast state
     const [toast, setToast] = useState(null);
 
@@ -59,13 +72,13 @@ export default function App() {
         setTimeout(() => setToast(null), 3000);
     };
 
-    // Theme state (dark mode is default)
+    // Theme state (light mode is default)
     const [darkMode, setDarkMode] = useState(() => {
         if (typeof window !== 'undefined') {
             const saved = localStorage.getItem('theme');
-            return saved !== 'light'; // Default to dark unless explicitly set to light
+            return saved === 'dark'; // Default to light unless explicitly set to dark
         }
-        return true;
+        return false;
     });
 
     // Apply dark mode class to document
@@ -82,32 +95,51 @@ export default function App() {
     // Keyboard shortcuts
     useEffect(() => {
         const handleKeyDown = (e) => {
-            // Don't trigger if user is typing in an input
+            // Don't trigger if user is typing in an input or modal is open
             if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') return;
+
+            // Escape - Close any modal
+            if (e.key === 'Escape') {
+                if (isModalOpen) closeModal();
+                if (showPositions) setShowPositions(false);
+                if (showSettings) setShowSettings(false);
+                if (showHelp) setShowHelp(false);
+                return;
+            }
+
+            // Don't process other shortcuts if any modal is open
+            if (isModalOpen || showPositions || showSettings || showHelp) return;
 
             // N - New trade
             if (e.key === 'n' && !e.metaKey && !e.ctrlKey) {
                 e.preventDefault();
                 openModal();
             }
-            // Escape - Close modal
-            if (e.key === 'Escape' && isModalOpen) {
-                closeModal();
+            // P - Positions
+            if (e.key === 'p' && !e.metaKey && !e.ctrlKey) {
+                e.preventDefault();
+                setShowPositions(true);
+            }
+            // S - Settings
+            if (e.key === 's' && !e.metaKey && !e.ctrlKey) {
+                e.preventDefault();
+                setShowSettings(true);
             }
             // D - Toggle dark mode
             if (e.key === 'd' && !e.metaKey && !e.ctrlKey) {
                 e.preventDefault();
                 setDarkMode(prev => !prev);
             }
-            // ? - Show shortcuts help
-            if (e.key === '?' || (e.key === '/' && e.shiftKey)) {
-                showToast('Shortcuts: N=New trade, D=Dark mode, Esc=Close');
+            // H - Help
+            if (e.key === 'h' && !e.metaKey && !e.ctrlKey) {
+                e.preventDefault();
+                setShowHelp(true);
             }
         };
 
         window.addEventListener('keydown', handleKeyDown);
         return () => window.removeEventListener('keydown', handleKeyDown);
-    }, [isModalOpen]);
+    }, [isModalOpen, showPositions, showSettings, showHelp]);
 
     // --- Data Fetching ---
     const fetchTrades = async () => {
@@ -126,8 +158,24 @@ export default function App() {
         }
     };
 
+    const fetchCapitalGainsStats = async () => {
+        try {
+            const response = await fetch(`${API_URL}/stats`);
+            if (!response.ok) return;
+            const json = await response.json();
+            setCapitalGainsStats({
+                realizedCapitalGL: json.data.realizedCapitalGL || 0,
+                openPositions: json.data.openPositions || 0,
+                closedPositions: json.data.closedPositions || 0
+            });
+        } catch (err) {
+            console.error('Error fetching capital gains stats:', err);
+        }
+    };
+
     useEffect(() => {
         fetchTrades();
+        fetchCapitalGainsStats();
     }, []);
 
     // --- Filtering & Sorting ---
@@ -267,6 +315,28 @@ export default function App() {
         setIsModalOpen(true);
     };
 
+    // Open a Covered Call on an assigned CSP
+    const openCoveredCall = (cspTrade) => {
+        setEditingId(null);
+        setIsRolling(false);
+        setRollFromTrade(null);
+        setFormData({
+            ticker: cspTrade.ticker,
+            openedDate: new Date().toISOString().split('T')[0],
+            expirationDate: '',
+            closedDate: '',
+            strike: '',
+            type: 'CC',
+            quantity: cspTrade.quantity,
+            delta: '',
+            entryPrice: '',
+            closePrice: '',
+            status: 'Open',
+            parentTradeId: cspTrade.id,
+        });
+        setIsModalOpen(true);
+    };
+
     const closeModal = () => {
         setIsModalOpen(false);
         setFormData(initialFormState);
@@ -343,6 +413,7 @@ export default function App() {
             if (!response.ok) throw new Error('Failed to save trade');
 
             await fetchTrades();
+            await fetchCapitalGainsStats();
             closeModal();
             // Go to first page when adding new trade
             if (!editingId) setCurrentPage(1);
@@ -359,6 +430,7 @@ export default function App() {
             const response = await fetch(`${API_URL}/trades/${id}`, { method: 'DELETE' });
             if (!response.ok) throw new Error('Failed to delete trade');
             await fetchTrades();
+            await fetchCapitalGainsStats();
             showToast('Trade deleted');
         } catch (err) {
             console.error('Error deleting trade:', err);
@@ -381,6 +453,7 @@ export default function App() {
             });
             if (!response.ok) throw new Error('Failed to close trade');
             await fetchTrades();
+            await fetchCapitalGainsStats();
             showToast(`${trade.ticker} closed at $0`);
         } catch (err) {
             console.error('Error closing trade:', err);
@@ -479,6 +552,7 @@ export default function App() {
 
             const result = await response.json();
             await fetchTrades();
+            await fetchCapitalGainsStats();
             alert(`Successfully imported ${result.data.imported} trades!`);
         } catch (err) {
             console.error('Error importing CSV:', err);
@@ -491,12 +565,27 @@ export default function App() {
 
     // --- Aggregation Logic ---
     const stats = useMemo(() => {
+        // Filter trades by time period (same as chart)
+        const now = new Date();
+        const periodStart = {
+            '1m': new Date(now.getFullYear(), now.getMonth() - 1, now.getDate()),
+            '3m': new Date(now.getFullYear(), now.getMonth() - 3, now.getDate()),
+            '6m': new Date(now.getFullYear(), now.getMonth() - 6, now.getDate()),
+            'ytd': new Date(now.getFullYear(), 0, 1),
+            'all': new Date(0)
+        }[chartPeriod];
+
+        const filteredTrades = trades.filter(t => {
+            const tradeDate = new Date(t.closedDate || t.expirationDate || t.openedDate);
+            return tradeDate >= periodStart;
+        });
+
         // Completed trades = not Open and not Rolled (terminal states only)
-        const completedTrades = trades.filter(t => t.status !== 'Open' && t.status !== 'Rolled');
-        const openTrades = trades.filter(t => t.status === 'Open');
+        const completedTrades = filteredTrades.filter(t => t.status !== 'Open' && t.status !== 'Rolled');
+        const openTrades = filteredTrades.filter(t => t.status === 'Open');
 
         // P/L for all non-open trades (includes Rolled for accurate total)
-        const allClosedTrades = trades.filter(t => t.status !== 'Open');
+        const allClosedTrades = filteredTrades.filter(t => t.status !== 'Open');
         const totalPnL = allClosedTrades.reduce((acc, t) => acc + calculateMetrics(t).pnl, 0);
 
         // Ticker stats (all closed trades)
@@ -520,7 +609,7 @@ export default function App() {
 
         // Chain-based win rate calculation
         // Find chain roots (trades with no parent)
-        const chainRoots = trades.filter(t => !t.parentTradeId);
+        const chainRoots = filteredTrades.filter(t => !t.parentTradeId);
 
         // Calculate chain P/L for each root
         const chains = chainRoots.map(root => {
@@ -529,12 +618,12 @@ export default function App() {
             let currentId = root.id;
 
             // Follow the chain forward (find children)
-            let child = trades.find(t => t.parentTradeId === currentId);
+            let child = filteredTrades.find(t => t.parentTradeId === currentId);
             while (child) {
                 chainPnL += calculateMetrics(child).pnl;
                 finalStatus = child.status;
                 currentId = child.id;
-                child = trades.find(t => t.parentTradeId === currentId);
+                child = filteredTrades.find(t => t.parentTradeId === currentId);
             }
 
             return {
@@ -559,12 +648,12 @@ export default function App() {
         const capitalAtRisk = openTrades.reduce((acc, t) => acc + calculateMetrics(t).collateral, 0);
 
         // Count rolled trades
-        const rolledCount = trades.filter(t => t.status === 'Rolled').length;
+        const rolledCount = filteredTrades.filter(t => t.status === 'Rolled').length;
 
-        // Total premium collected (all trades)
-        const totalPremiumCollected = trades.reduce((acc, t) => {
-            const { totalPremium } = calculateMetrics(t);
-            return acc + totalPremium;
+        // Net premium collected (only closed trades, not open) - premium minus close costs
+        const totalPremiumCollected = allClosedTrades.reduce((acc, t) => {
+            const { pnl } = calculateMetrics(t);
+            return acc + pnl;
         }, 0);
 
         // Best performing ticker
@@ -582,12 +671,18 @@ export default function App() {
             capitalAtRisk,
             openTradesCount: openTrades.length,
             completedTradesCount: completedTrades.length,
+            closedTradesCount: allClosedTrades.length,
             resolvedChains: resolvedChains.length,
             rolledCount,
             totalPremiumCollected,
-            bestTicker
+            bestTicker,
+            // Capital gains from positions
+            realizedCapitalGL: capitalGainsStats.realizedCapitalGL,
+            openPositions: capitalGainsStats.openPositions,
+            closedPositions: capitalGainsStats.closedPositions,
+            totalPnLWithCapitalGains: totalPnL + capitalGainsStats.realizedCapitalGL
         };
-    }, [trades]);
+    }, [trades, capitalGainsStats, chartPeriod]);
 
     // Build a map of trade chains for visual indicators
     const chainInfo = useMemo(() => {
@@ -705,6 +800,8 @@ export default function App() {
                     onExport={exportToCSV}
                     onImport={importFromCSV}
                     onNewTrade={() => openModal()}
+                    onOpenPositions={() => setShowPositions(true)}
+                    onOpenSettings={() => setShowSettings(true)}
                 />
 
                 {/* Dashboard Grid */}
@@ -723,20 +820,17 @@ export default function App() {
                 <TradeTable
                     trades={trades}
                     filteredAndSortedTrades={filteredAndSortedTrades}
-                    paginatedTrades={paginatedTrades}
-                    chainInfo={chainInfo}
                     statusFilter={statusFilter}
                     setStatusFilter={setStatusFilter}
                     sortConfig={sortConfig}
                     setSortConfig={setSortConfig}
                     currentPage={currentPage}
                     setCurrentPage={setCurrentPage}
-                    totalPages={totalPages}
                     onQuickClose={quickCloseTrade}
                     onRoll={rollTrade}
-                    onDuplicate={duplicateTrade}
                     onEdit={openModal}
                     onDelete={deleteTrade}
+                    onOpenCC={openCoveredCall}
                 />
 
                 {/* Summary Cards */}
@@ -746,6 +840,9 @@ export default function App() {
 
             {/* Toast Notification */}
             <Toast toast={toast} onClose={() => setToast(null)} />
+
+            {/* Welcome/Help Modal */}
+            <WelcomeModal isOpen={showHelp} onClose={() => setShowHelp(false)} />
 
             {/* Modal */}
             {isModalOpen && (
@@ -951,6 +1048,22 @@ export default function App() {
                         </form>
                     </div>
                 </div>
+            )}
+
+            {/* Positions Modal */}
+            {showPositions && (
+                <PositionsTable
+                    onClose={() => setShowPositions(false)}
+                    showToast={showToast}
+                />
+            )}
+
+            {/* Settings Modal */}
+            {showSettings && (
+                <SettingsModal
+                    onClose={() => setShowSettings(false)}
+                    showToast={showToast}
+                />
             )}
         </div>
     );
