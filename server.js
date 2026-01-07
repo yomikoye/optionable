@@ -98,6 +98,18 @@ try {
     // Column already exists, ignore
 }
 
+// Create indexes for performance (idempotent)
+db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_trades_status ON trades(status);
+    CREATE INDEX IF NOT EXISTS idx_trades_ticker ON trades(ticker);
+    CREATE INDEX IF NOT EXISTS idx_trades_openedDate ON trades(openedDate);
+    CREATE INDEX IF NOT EXISTS idx_trades_expirationDate ON trades(expirationDate);
+    CREATE INDEX IF NOT EXISTS idx_trades_closedDate ON trades(closedDate);
+    CREATE INDEX IF NOT EXISTS idx_trades_parentTradeId ON trades(parentTradeId);
+    CREATE INDEX IF NOT EXISTS idx_trades_status_openedDate ON trades(status, openedDate);
+`);
+console.log('📊 Database indexes verified');
+
 // Seed example data if database is empty (for demo purposes)
 const tradeCount = db.prepare('SELECT COUNT(*) as count FROM trades').get();
 if (tradeCount.count === 0) {
@@ -134,6 +146,48 @@ if (tradeCount.count === 0) {
 app.use(cors());
 app.use(express.json());
 
+// Request ID middleware
+app.use((req, res, next) => {
+    req.requestId = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    next();
+});
+
+// Response helpers for consistent API format
+const apiResponse = {
+    success: (res, data, meta = {}) => {
+        res.json({
+            success: true,
+            data,
+            meta: {
+                timestamp: new Date().toISOString(),
+                ...meta
+            }
+        });
+    },
+    created: (res, data, meta = {}) => {
+        res.status(201).json({
+            success: true,
+            data,
+            meta: {
+                timestamp: new Date().toISOString(),
+                ...meta
+            }
+        });
+    },
+    error: (res, message, statusCode = 500, details = null) => {
+        res.status(statusCode).json({
+            success: false,
+            error: {
+                message,
+                ...(details && { details })
+            },
+            meta: {
+                timestamp: new Date().toISOString()
+            }
+        });
+    }
+};
+
 // Serve static files in production
 if (process.env.NODE_ENV === 'production') {
     app.use(express.static(join(__dirname, 'dist')));
@@ -141,14 +195,92 @@ if (process.env.NODE_ENV === 'production') {
 
 // ============== API Routes ==============
 
-// GET all trades
+// Health check endpoint
+app.get('/api/health', (req, res) => {
+    try {
+        const dbCheck = db.prepare('SELECT COUNT(*) as count FROM trades').get();
+        apiResponse.success(res, {
+            status: 'healthy',
+            database: { connected: true, tradeCount: dbCheck.count },
+            version: process.env.npm_package_version || '1.0.0'
+        });
+    } catch (error) {
+        apiResponse.error(res, 'Service unhealthy', 503, { database: error.message });
+    }
+});
+
+// GET all trades with pagination, filtering, and sorting
 app.get('/api/trades', (req, res) => {
     try {
-        const trades = db.prepare('SELECT * FROM trades ORDER BY openedDate ASC, id ASC').all();
-        res.json(trades);
+        const {
+            page = 1,
+            limit = 50,
+            status,
+            ticker,
+            sortBy = 'openedDate',
+            sortDir = 'asc'
+        } = req.query;
+
+        const pageNum = Math.max(1, parseInt(page));
+        const limitNum = Math.min(100, Math.max(1, parseInt(limit)));
+        const offset = (pageNum - 1) * limitNum;
+
+        // Valid sort columns (whitelist for SQL injection prevention)
+        const validSortColumns = ['openedDate', 'expirationDate', 'closedDate', 'ticker', 'strike', 'status', 'entryPrice', 'closePrice', 'type', 'id'];
+        const sortColumn = validSortColumns.includes(sortBy) ? sortBy : 'openedDate';
+        const sortDirection = sortDir.toLowerCase() === 'desc' ? 'DESC' : 'ASC';
+
+        // Build WHERE clause
+        const conditions = [];
+        const params = [];
+
+        if (status && status !== 'all') {
+            if (status === 'open') {
+                conditions.push('status = ?');
+                params.push('Open');
+            } else if (status === 'closed') {
+                conditions.push("status IN ('Expired', 'Assigned', 'Closed', 'Rolled')");
+            } else {
+                conditions.push('status = ?');
+                params.push(status);
+            }
+        }
+
+        if (ticker) {
+            conditions.push('ticker = ?');
+            params.push(ticker.toUpperCase());
+        }
+
+        const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+
+        // Get total count
+        const countQuery = `SELECT COUNT(*) as total FROM trades ${whereClause}`;
+        const { total } = db.prepare(countQuery).get(...params);
+
+        // Get paginated data
+        const dataQuery = `
+            SELECT * FROM trades
+            ${whereClause}
+            ORDER BY ${sortColumn} ${sortDirection}, id ASC
+            LIMIT ? OFFSET ?
+        `;
+        const trades = db.prepare(dataQuery).all(...params, limitNum, offset);
+
+        const totalPages = Math.ceil(total / limitNum);
+
+        apiResponse.success(res, trades, {
+            pagination: {
+                page: pageNum,
+                limit: limitNum,
+                total,
+                totalPages,
+                hasNext: pageNum < totalPages,
+                hasPrev: pageNum > 1
+            }
+        });
     } catch (error) {
         console.error('Error fetching trades:', error);
-        res.status(500).json({ error: 'Failed to fetch trades' });
+        apiResponse.error(res, 'Failed to fetch trades');
     }
 });
 
@@ -157,12 +289,12 @@ app.get('/api/trades/:id', (req, res) => {
     try {
         const trade = db.prepare('SELECT * FROM trades WHERE id = ?').get(req.params.id);
         if (!trade) {
-            return res.status(404).json({ error: 'Trade not found' });
+            return apiResponse.error(res, 'Trade not found', 404);
         }
-        res.json(trade);
+        apiResponse.success(res, trade);
     } catch (error) {
         console.error('Error fetching trade:', error);
-        res.status(500).json({ error: 'Failed to fetch trade' });
+        apiResponse.error(res, 'Failed to fetch trade');
     }
 });
 
@@ -205,10 +337,10 @@ app.post('/api/trades', (req, res) => {
         );
 
         const newTrade = db.prepare('SELECT * FROM trades WHERE id = ?').get(result.lastInsertRowid);
-        res.status(201).json(newTrade);
+        apiResponse.created(res, newTrade);
     } catch (error) {
         console.error('Error creating trade:', error);
-        res.status(500).json({ error: 'Failed to create trade' });
+        apiResponse.error(res, 'Failed to create trade');
     }
 });
 
@@ -218,7 +350,7 @@ app.post('/api/trades/import', (req, res) => {
         const { trades } = req.body;
 
         if (!Array.isArray(trades) || trades.length === 0) {
-            return res.status(400).json({ error: 'No trades provided' });
+            return apiResponse.error(res, 'No trades provided', 400);
         }
 
         const stmt = db.prepare(`
@@ -253,10 +385,10 @@ app.post('/api/trades/import', (req, res) => {
         });
 
         const imported = insertMany(trades);
-        res.status(201).json({ imported, total: trades.length });
+        apiResponse.created(res, { imported, total: trades.length });
     } catch (error) {
         console.error('Error importing trades:', error);
-        res.status(500).json({ error: 'Failed to import trades' });
+        apiResponse.error(res, 'Failed to import trades');
     }
 });
 
@@ -279,8 +411,8 @@ app.put('/api/trades/:id', (req, res) => {
         } = req.body;
 
         const stmt = db.prepare(`
-      UPDATE trades 
-      SET ticker = ?, type = ?, strike = ?, quantity = ?, delta = ?, entryPrice = ?, closePrice = ?, 
+      UPDATE trades
+      SET ticker = ?, type = ?, strike = ?, quantity = ?, delta = ?, entryPrice = ?, closePrice = ?,
           openedDate = ?, expirationDate = ?, closedDate = ?, status = ?, parentTradeId = ?, updatedAt = CURRENT_TIMESTAMP
       WHERE id = ?
     `);
@@ -302,14 +434,14 @@ app.put('/api/trades/:id', (req, res) => {
         );
 
         if (result.changes === 0) {
-            return res.status(404).json({ error: 'Trade not found' });
+            return apiResponse.error(res, 'Trade not found', 404);
         }
 
         const updatedTrade = db.prepare('SELECT * FROM trades WHERE id = ?').get(req.params.id);
-        res.json(updatedTrade);
+        apiResponse.success(res, updatedTrade);
     } catch (error) {
         console.error('Error updating trade:', error);
-        res.status(500).json({ error: 'Failed to update trade' });
+        apiResponse.error(res, 'Failed to update trade');
     }
 });
 
@@ -318,96 +450,129 @@ app.delete('/api/trades/:id', (req, res) => {
     try {
         const result = db.prepare('DELETE FROM trades WHERE id = ?').run(req.params.id);
         if (result.changes === 0) {
-            return res.status(404).json({ error: 'Trade not found' });
+            return apiResponse.error(res, 'Trade not found', 404);
         }
-        res.json({ success: true });
+        apiResponse.success(res, { deleted: true, id: parseInt(req.params.id) });
     } catch (error) {
         console.error('Error deleting trade:', error);
-        res.status(500).json({ error: 'Failed to delete trade' });
+        apiResponse.error(res, 'Failed to delete trade');
     }
 });
 
-// GET stats/summary
+// GET stats/summary - Using SQL aggregations for performance
 app.get('/api/stats', (req, res) => {
     try {
-        const trades = db.prepare('SELECT * FROM trades').all();
+        // Main stats aggregation - single query
+        const mainStats = db.prepare(`
+            SELECT
+                COUNT(*) as totalTrades,
+                COUNT(CASE WHEN status = 'Open' THEN 1 END) as openCount,
+                COUNT(CASE WHEN status = 'Expired' THEN 1 END) as expiredCount,
+                COUNT(CASE WHEN status = 'Assigned' THEN 1 END) as assignedCount,
+                COUNT(CASE WHEN status = 'Rolled' THEN 1 END) as rolledCount,
+                COUNT(CASE WHEN status = 'Closed' THEN 1 END) as closedCount,
+                COALESCE(SUM((entryPrice - closePrice) * quantity * 100), 0) as totalPnL,
+                COALESCE(SUM(entryPrice * quantity * 100), 0) as totalPremium,
+                COALESCE(SUM(CASE WHEN status = 'Open' THEN strike * quantity * 100 ELSE 0 END), 0) as capitalAtRisk
+            FROM trades
+        `).get();
 
-        // Calculate P/L for a single trade
-        const calculatePnL = (trade) => {
-            const quantity = trade.quantity || 0;
-            const entryPrice = trade.entryPrice || 0;
-            const closePrice = trade.closePrice || 0;
-            const totalPremium = entryPrice * quantity * 100;
-            const totalCloseCost = closePrice * quantity * 100;
-            return totalPremium - totalCloseCost;
-        };
+        // Chain statistics - count roots and resolved chains
+        const chainStats = db.prepare(`
+            SELECT
+                COUNT(*) as totalChains,
+                COUNT(CASE WHEN status NOT IN ('Open', 'Rolled') THEN 1 END) as resolvedChains
+            FROM trades
+            WHERE parentTradeId IS NULL
+        `).get();
 
-        // Build a map for quick lookup
-        const tradeMap = new Map(trades.map(t => [t.id, t]));
+        // For win rate, we need to calculate chain P/L (requires iteration for now)
+        // This is still needed because chain P/L spans multiple rows
+        const chainRoots = db.prepare(`SELECT * FROM trades WHERE parentTradeId IS NULL`).all();
+        const allTrades = db.prepare(`SELECT * FROM trades`).all();
 
-        // Find all trades that are children (have a parent)
-        const childTradeIds = new Set(trades.filter(t => t.parentTradeId).map(t => t.id));
+        let winningChains = 0;
+        let resolvedCount = 0;
 
-        // Find chain roots: trades that have no parent AND are not a child of another trade
-        // Actually, chain roots are trades where parentTradeId is null
-        const chainRoots = trades.filter(t => !t.parentTradeId);
-
-        // For each chain root, calculate the full chain P/L and determine if resolved
-        const chains = chainRoots.map(root => {
-            let chainPnL = 0;
-            let currentTrade = root;
+        for (const root of chainRoots) {
+            let chainPnL = (root.entryPrice - root.closePrice) * root.quantity * 100;
+            let currentId = root.id;
             let finalStatus = root.status;
-            const chainTrades = [root];
 
-            // Sum P/L for the root
-            chainPnL += calculatePnL(root);
-
-            // Find children (trades where parentTradeId points to current)
-            // We need to follow the chain forward
-            let childTrade = trades.find(t => t.parentTradeId === currentTrade.id);
-            while (childTrade) {
-                chainPnL += calculatePnL(childTrade);
-                chainTrades.push(childTrade);
-                finalStatus = childTrade.status;
-                currentTrade = childTrade;
-                childTrade = trades.find(t => t.parentTradeId === currentTrade.id);
+            // Follow the chain
+            let child = allTrades.find(t => t.parentTradeId === currentId);
+            while (child) {
+                chainPnL += (child.entryPrice - child.closePrice) * child.quantity * 100;
+                finalStatus = child.status;
+                currentId = child.id;
+                child = allTrades.find(t => t.parentTradeId === currentId);
             }
 
-            return {
-                rootId: root.id,
-                chainPnL,
-                finalStatus,
-                tradeCount: chainTrades.length,
-                isResolved: finalStatus !== 'Open' && finalStatus !== 'Rolled'
-            };
-        });
+            if (finalStatus !== 'Open' && finalStatus !== 'Rolled') {
+                resolvedCount++;
+                if (chainPnL > 0) winningChains++;
+            }
+        }
 
-        // Calculate win rate based on resolved chains only
-        const resolvedChains = chains.filter(c => c.isResolved);
-        const winningChains = resolvedChains.filter(c => c.chainPnL > 0).length;
-        const chainWinRate = resolvedChains.length > 0 ? (winningChains / resolvedChains.length) * 100 : 0;
+        const winRate = resolvedCount > 0 ? (winningChains / resolvedCount) * 100 : 0;
 
-        // Total P/L (all trades)
-        const totalPnL = trades.reduce((acc, t) => acc + calculatePnL(t), 0);
-        const totalTrades = trades.length;
-        const totalAssigned = trades.filter(t => t.status === 'Assigned').length;
-        const totalExpired = trades.filter(t => t.status === 'Expired').length;
-        const totalRolled = trades.filter(t => t.status === 'Rolled').length;
+        // Monthly P/L aggregation
+        const monthlyStats = db.prepare(`
+            SELECT
+                strftime('%Y-%m', COALESCE(closedDate, openedDate)) as month,
+                SUM((entryPrice - closePrice) * quantity * 100) as pnl
+            FROM trades
+            WHERE status NOT IN ('Open', 'Rolled')
+            GROUP BY month
+            ORDER BY month DESC
+        `).all();
 
-        res.json({
-            totalPnL,
-            totalTrades,
+        // Ticker P/L aggregation
+        const tickerStats = db.prepare(`
+            SELECT
+                ticker,
+                SUM((entryPrice - closePrice) * quantity * 100) as pnl
+            FROM trades
+            GROUP BY ticker
+            ORDER BY pnl DESC
+        `).all();
+
+        // Best ticker
+        const bestTicker = tickerStats.length > 0 ? tickerStats[0] : null;
+
+        // Average ROI for completed trades
+        const avgRoiResult = db.prepare(`
+            SELECT AVG(
+                CASE WHEN strike > 0 AND quantity > 0
+                THEN ((entryPrice - closePrice) * 100.0) / strike
+                ELSE 0 END
+            ) as avgRoi
+            FROM trades
+            WHERE status NOT IN ('Open', 'Rolled')
+        `).get();
+
+        apiResponse.success(res, {
+            totalPnL: mainStats.totalPnL,
+            totalPremiumCollected: mainStats.totalPremium,
+            totalTrades: mainStats.totalTrades,
+            openTradesCount: mainStats.openCount,
+            completedTradesCount: mainStats.expiredCount + mainStats.assignedCount + mainStats.closedCount,
+            capitalAtRisk: mainStats.capitalAtRisk,
             winningChains,
-            totalChains: chainRoots.length,
-            resolvedChains: resolvedChains.length,
-            winRate: chainWinRate,
-            totalAssigned,
-            totalExpired,
-            totalRolled
+            totalChains: chainStats.totalChains,
+            resolvedChains: resolvedCount,
+            winRate,
+            avgRoi: avgRoiResult.avgRoi || 0,
+            totalAssigned: mainStats.assignedCount,
+            totalExpired: mainStats.expiredCount,
+            totalRolled: mainStats.rolledCount,
+            monthlyStats: Object.fromEntries(monthlyStats.map(m => [m.month, m.pnl])),
+            tickerStats: Object.fromEntries(tickerStats.map(t => [t.ticker, t.pnl])),
+            bestTicker
         });
     } catch (error) {
         console.error('Error fetching stats:', error);
-        res.status(500).json({ error: 'Failed to fetch stats' });
+        apiResponse.error(res, 'Failed to fetch stats');
     }
 });
 

@@ -35,73 +35,13 @@ import {
     ResponsiveContainer
 } from 'recharts';
 
-// --- API Base URL ---
-const API_URL = '/api';
+// Shared utilities
+import { API_URL, TRADES_PER_PAGE } from './utils/constants';
+import { formatDate, formatDateShort, formatCurrency, formatPercent } from './utils/formatters';
+import { calculateDTE, calculateMetrics } from './utils/calculations';
 
-// --- Constants ---
-const TRADES_PER_PAGE = 10;
-
-// --- Helper Functions ---
-const formatDate = (dateStr) => {
-    if (!dateStr) return '';
-    return new Date(dateStr).toLocaleDateString('en-US', { month: 'numeric', day: 'numeric', year: 'numeric' });
-};
-
-const formatDateShort = (dateStr) => {
-    if (!dateStr) return '';
-    return new Date(dateStr).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-};
-
-const formatCurrency = (val) => {
-    return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(val);
-};
-
-const formatPercent = (val) => {
-    return new Intl.NumberFormat('en-US', { style: 'percent', minimumFractionDigits: 2 }).format(val / 100);
-};
-
-// Calculate Days to Expiration
-const calculateDTE = (expirationDate, status) => {
-    if (status !== 'Open') return null;
-    if (!expirationDate) return null;
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const expDate = new Date(expirationDate);
-    expDate.setHours(0, 0, 0, 0);
-    const diffTime = expDate - today;
-    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-    return diffDays;
-};
-
-// Calculate days held for a trade
-const calculateDaysHeld = (trade) => {
-    const openDate = new Date(trade.openedDate);
-    const closeDate = trade.closedDate ? new Date(trade.closedDate) :
-        (trade.status === 'Open' ? new Date() : new Date(trade.expirationDate));
-    const diffTime = Math.abs(closeDate - openDate);
-    return Math.max(1, Math.ceil(diffTime / (1000 * 60 * 60 * 24)));
-};
-
-const calculateMetrics = (trade) => {
-    const quantity = parseFloat(trade.quantity) || 0;
-    const strike = parseFloat(trade.strike) || 0;
-    const entryPrice = parseFloat(trade.entryPrice) || 0;
-    const closePrice = parseFloat(trade.closePrice) || 0;
-
-    const totalPremium = entryPrice * quantity * 100;
-    const totalCloseCost = closePrice * quantity * 100;
-    const pnl = totalPremium - totalCloseCost;
-
-    const collateral = strike * quantity * 100;
-    const roi = collateral > 0 ? (pnl / collateral) * 100 : 0;
-
-    const daysHeld = calculateDaysHeld(trade);
-    const annualizedRoi = daysHeld > 0 ? (roi / daysHeld) * 365 : 0;
-
-    const maxProfitPercent = totalPremium > 0 ? ((totalPremium - totalCloseCost) / totalPremium) * 100 : 0;
-
-    return { totalPremium, totalCloseCost, pnl, roi, collateral, maxProfitPercent, annualizedRoi, daysHeld };
-};
+// Components
+import { Toast } from './components/ui/Toast';
 
 // --- Main Component ---
 export default function App() {
@@ -199,10 +139,11 @@ export default function App() {
     // --- Data Fetching ---
     const fetchTrades = async () => {
         try {
-            const response = await fetch(`${API_URL}/trades`);
+            // Request all trades (limit=1000) for client-side filtering/stats
+            const response = await fetch(`${API_URL}/trades?limit=1000`);
             if (!response.ok) throw new Error('Failed to fetch trades');
-            const data = await response.json();
-            setTrades(data);
+            const json = await response.json();
+            setTrades(json.data);
             setError(null);
         } catch (err) {
             console.error('Error fetching trades:', err);
@@ -581,7 +522,7 @@ export default function App() {
 
             const result = await response.json();
             await fetchTrades();
-            alert(`Successfully imported ${result.imported} trades!`);
+            alert(`Successfully imported ${result.data.imported} trades!`);
         } catch (err) {
             console.error('Error importing CSV:', err);
             setError('Failed to import CSV. Please check the file format.');
@@ -1307,21 +1248,7 @@ export default function App() {
             </div>
 
             {/* Toast Notification */}
-            {toast && (
-                <div className={`fixed bottom-4 right-4 z-50 px-4 py-3 rounded-lg shadow-lg border flex items-center gap-2 animate-in slide-in-from-bottom-2 ${
-                    toast.type === 'success'
-                        ? 'bg-emerald-50 dark:bg-emerald-900/90 border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-300'
-                        : toast.type === 'error'
-                        ? 'bg-red-50 dark:bg-red-900/90 border-red-200 dark:border-red-800 text-red-700 dark:text-red-300'
-                        : 'bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300'
-                }`}>
-                    {toast.type === 'success' && <Check className="w-4 h-4" />}
-                    <span className="text-sm font-medium">{toast.message}</span>
-                    <button onClick={() => setToast(null)} className="ml-2 opacity-60 hover:opacity-100">
-                        <X className="w-4 h-4" />
-                    </button>
-                </div>
-            )}
+            <Toast toast={toast} onClose={() => setToast(null)} />
 
             {/* Modal */}
             {isModalOpen && (
