@@ -2,100 +2,130 @@
 
 A self-hosted wheel strategy tracker for Cash Secured Puts (CSPs) and Covered Calls (CCs).
 
-![Dashboard](https://img.shields.io/badge/Stack-React%20%2B%20SQLite-blue)
-![Docker](https://img.shields.io/badge/Docker-Ready-green)
+![Version](https://img.shields.io/badge/version-0.6.0-blue)
+![Docker](https://img.shields.io/badge/docker-yomikoye%2Foptionable-green)
+![Platforms](https://img.shields.io/badge/platforms-amd64%20%7C%20arm64-lightgrey)
 
 ## Features
 
-- 📊 **Dashboard** - Total P/L, win rate, assignments at a glance
-- 📝 **Trade Log** - Track all your CSP and CC trades
-- 📈 **Analytics** - Monthly and per-ticker P/L summaries
-- 🔄 **Auto Calculations** - P/L, ROI, collateral metrics
-- 💾 **Persistent Storage** - SQLite database with Docker volume support
-- 🏠 **Self-hosted** - Full data ownership, no cloud dependencies
+- **Dashboard** - Premium collected, ROI, win rate, stock gains, total P/L, deployed capital
+- **Capital Gains Tracking** - Track stock positions from CSP assignments through CC sales
+- **P/L Chart** - Cumulative profit/loss visualization with time period filters (1M, 3M, 6M, YTD, All)
+- **Trade Log** - Full trade history with chain grouping, sorting, filtering, pagination
+- **Trade Chains** - Rolled trades and CSP→CC sequences grouped together
+- **Positions Table** - Track open and closed stock positions with realized/unrealized gains
+- **Live Stock Prices** - Optional real-time prices for unrealized G/L (via stockprices.dev)
+- **Roll Tracking** - Link rolled trades to track full position chains
+- **Analytics** - Monthly and per-ticker P/L breakdowns
+- **Auto Calculations** - P/L, ROI, annualized ROI, DTE, collateral
+- **CSV Import/Export** - Backup and restore your trade data
+- **Dark Mode** - Light mode default, toggle to dark
+- **Keyboard Shortcuts** - N (new), P (positions), S (settings), H (help), D (dark mode), Esc (close)
+- **Welcome Guide** - First-time user onboarding with feature overview
+- **Self-hosted** - SQLite database, full data ownership
 
 ## Quick Start
 
 ### Local Development
 
 ```bash
-# Install dependencies
 npm install
-
-# Start development server (runs both backend and frontend)
 npm run dev
 ```
 
 - Frontend: http://localhost:5173
 - Backend API: http://localhost:8080
 
-### Docker (Local Testing)
+### Docker
 
 ```bash
-# Build and run locally
-docker compose -f docker-compose.local.yml up --build
+# Pull and run
+docker run -d -p 8080:8080 -v optionable-data:/data yomikoye/optionable:latest
 
-# Access at http://localhost:8080
+# Or with docker-compose
+docker compose up -d
 ```
 
-### Docker (Homelab Deployment)
+### Homelab Deployment
 
-The main `docker-compose.yml` is configured for homelab deployment with:
-- Traefik reverse proxy integration
-- Persistent volume at `/mnt/shared/portainer/optionable`
-- External `homelab-network`
+The `docker-compose.yml` is configured for Traefik reverse proxy:
 
-```bash
-# Pull and deploy
-docker compose up -d
+```yaml
+services:
+  optionable:
+    image: yomikoye/optionable:latest
+    volumes:
+      - /path/to/data:/data
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.optionable.rule=Host(`optionable.yourdomain.com`)"
+```
+
+## API
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/health` | Health check with version |
+| GET | `/api/trades` | List trades (supports `?page=1&limit=10&status=Open&ticker=META`) |
+| GET | `/api/trades/:id` | Get single trade |
+| POST | `/api/trades` | Create trade |
+| PUT | `/api/trades/:id` | Update trade |
+| DELETE | `/api/trades/:id` | Delete trade (handles FK constraints) |
+| POST | `/api/trades/import` | Bulk import trades |
+| GET | `/api/stats` | Aggregated statistics |
+| GET | `/api/positions` | List stock positions |
+| POST | `/api/positions` | Create position |
+| PUT | `/api/positions/:id` | Update/close position |
+| DELETE | `/api/positions/:id` | Delete position |
+| GET | `/api/positions/summary` | Capital gains summary |
+| GET | `/api/settings` | Get settings |
+| PUT | `/api/settings/:key` | Update setting |
+| GET | `/api/prices/:ticker` | Get stock price (cached) |
+
+All responses use consistent format:
+```json
+{
+  "success": true,
+  "data": {...},
+  "meta": { "timestamp": "...", "pagination": {...} }
+}
 ```
 
 ## Project Structure
 
 ```
-optionable/
-├── src/
-│   ├── App.jsx          # Main React component
-│   ├── main.jsx         # React entry point
-│   └── index.css        # Tailwind styles
-├── server.js            # Express API + SQLite
-├── Dockerfile           # Multi-stage build
-├── docker-compose.yml   # Homelab deployment
-└── docker-compose.local.yml  # Local testing
+src/
+├── App.jsx                    # Main app, state management, TradeModal
+├── components/
+│   ├── ui/
+│   │   ├── Toast.jsx          # Notifications
+│   │   └── WelcomeModal.jsx   # First-time user guide
+│   ├── layout/Header.jsx      # App header
+│   ├── dashboard/
+│   │   ├── Dashboard.jsx      # KPI cards
+│   │   └── SummaryCards.jsx   # Monthly/ticker stats
+│   ├── chart/PnLChart.jsx     # P/L visualization
+│   ├── trades/TradeTable.jsx  # Trade log with chains
+│   ├── positions/PositionsTable.jsx  # Stock positions
+│   └── settings/SettingsModal.jsx    # App settings
+├── utils/                     # formatters, calculations, constants
+└── index.css                  # Tailwind styles
 ```
-
-## API Endpoints
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/api/trades` | List all trades |
-| GET | `/api/trades/:id` | Get single trade |
-| POST | `/api/trades` | Create new trade |
-| PUT | `/api/trades/:id` | Update trade |
-| DELETE | `/api/trades/:id` | Delete trade |
-| GET | `/api/stats` | Get aggregated stats |
-
-## Data Storage
-
-SQLite database is stored at:
-- **Local dev**: `./data/optionable.db`
-- **Docker**: `/data/optionable.db` (mount a volume to persist)
 
 ## Tech Stack
 
-- **Frontend**: React 18 + Vite + Tailwind CSS
-- **Backend**: Express.js
-- **Database**: SQLite (better-sqlite3)
-- **Container**: Docker multi-stage build
+- **Frontend**: React 18, Vite, Tailwind CSS, Recharts, Lucide Icons
+- **Backend**: Express.js, better-sqlite3
+- **Container**: Docker multi-stage build (Node 20 Alpine)
 
-## Building the Docker Image
+## Building Docker
 
 ```bash
-# Build locally
-docker build -t yomikoye/optionable:latest .
-
-# Push to registry (if using Docker Hub)
-docker push yomikoye/optionable:latest
+# Multi-platform build and push
+docker buildx build --platform linux/amd64,linux/arm64 \
+  -t yomikoye/optionable:0.6.0 \
+  -t yomikoye/optionable:latest \
+  --push .
 ```
 
 ## License

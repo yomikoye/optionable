@@ -1,5 +1,6 @@
 // UI Components
 export { Toast } from './ui/Toast';
+export { WelcomeModal } from './ui/WelcomeModal';
 
 // Layout Components
 export { Header } from './layout/Header';
@@ -13,3 +14,9 @@ export { PnLChart } from './chart/PnLChart';
 
 // Trade Components
 export { TradeTable } from './trades/TradeTable';
+
+// Position Components
+export { PositionsTable } from './positions/PositionsTable';
+
+// Settings Components
+export { SettingsModal } from './settings/SettingsModal';
