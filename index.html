@@ -7,6 +7,15 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="description" content="Track your Cash Secured Puts and Covered Calls wheel strategy" />
     <title>Optionable | Wheel Strategy Tracker</title>
+    <script>
+        // Apply dark mode immediately to prevent flash (dark is default)
+        (function() {
+            const theme = localStorage.getItem('theme');
+            if (theme !== 'light') {
+                document.documentElement.classList.add('dark');
+            }
+        })();
+    </script>
 </head>
 
 <body>

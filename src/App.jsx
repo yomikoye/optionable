@@ -13,7 +13,17 @@ import {
     RefreshCw,
     Link2,
     Download,
-    Upload
+    Upload,
+    Moon,
+    Sun,
+    Check,
+    ArrowUpDown,
+    ArrowUp,
+    ArrowDown,
+    DollarSign,
+    Target,
+    Clock,
+    Keyboard
 } from 'lucide-react';
 import {
     AreaChart,
@@ -122,6 +132,70 @@ export default function App() {
     const [rollFromTrade, setRollFromTrade] = useState(null);
     const [rollClosePrice, setRollClosePrice] = useState('');
 
+    // Filter & Sort state
+    const [statusFilter, setStatusFilter] = useState('all'); // 'all', 'open', 'closed'
+    const [sortConfig, setSortConfig] = useState({ key: null, direction: 'desc' });
+    const [chartPeriod, setChartPeriod] = useState('all'); // '1m', '3m', '6m', 'ytd', 'all'
+
+    // Toast state
+    const [toast, setToast] = useState(null);
+
+    // Show toast helper
+    const showToast = (message, type = 'success') => {
+        setToast({ message, type });
+        setTimeout(() => setToast(null), 3000);
+    };
+
+    // Theme state (dark mode is default)
+    const [darkMode, setDarkMode] = useState(() => {
+        if (typeof window !== 'undefined') {
+            const saved = localStorage.getItem('theme');
+            return saved !== 'light'; // Default to dark unless explicitly set to light
+        }
+        return true;
+    });
+
+    // Apply dark mode class to document
+    useEffect(() => {
+        if (darkMode) {
+            document.documentElement.classList.add('dark');
+            localStorage.setItem('theme', 'dark');
+        } else {
+            document.documentElement.classList.remove('dark');
+            localStorage.setItem('theme', 'light');
+        }
+    }, [darkMode]);
+
+    // Keyboard shortcuts
+    useEffect(() => {
+        const handleKeyDown = (e) => {
+            // Don't trigger if user is typing in an input
+            if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') return;
+
+            // N - New trade
+            if (e.key === 'n' && !e.metaKey && !e.ctrlKey) {
+                e.preventDefault();
+                openModal();
+            }
+            // Escape - Close modal
+            if (e.key === 'Escape' && isModalOpen) {
+                closeModal();
+            }
+            // D - Toggle dark mode
+            if (e.key === 'd' && !e.metaKey && !e.ctrlKey) {
+                e.preventDefault();
+                setDarkMode(prev => !prev);
+            }
+            // ? - Show shortcuts help
+            if (e.key === '?' || (e.key === '/' && e.shiftKey)) {
+                showToast('Shortcuts: N=New trade, D=Dark mode, Esc=Close');
+            }
+        };
+
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+    }, [isModalOpen]);
+
     // --- Data Fetching ---
     const fetchTrades = async () => {
         try {
@@ -142,12 +216,71 @@ export default function App() {
         fetchTrades();
     }, []);
 
+    // --- Filtering & Sorting ---
+    const filteredAndSortedTrades = useMemo(() => {
+        // Filter by status
+        let result = trades;
+        if (statusFilter === 'open') {
+            result = trades.filter(t => t.status === 'Open');
+        } else if (statusFilter === 'closed') {
+            result = trades.filter(t => t.status !== 'Open');
+        }
+
+        // Sort if sort config is set
+        if (sortConfig.key) {
+            result = [...result].sort((a, b) => {
+                let aVal, bVal;
+
+                if (sortConfig.key === 'pnl' || sortConfig.key === 'roi' || sortConfig.key === 'annualizedRoi') {
+                    const aMetrics = calculateMetrics(a);
+                    const bMetrics = calculateMetrics(b);
+                    aVal = aMetrics[sortConfig.key];
+                    bVal = bMetrics[sortConfig.key];
+                } else if (sortConfig.key === 'daysHeld') {
+                    aVal = calculateDaysHeld(a);
+                    bVal = calculateDaysHeld(b);
+                } else if (sortConfig.key === 'ticker') {
+                    aVal = a.ticker.toLowerCase();
+                    bVal = b.ticker.toLowerCase();
+                } else if (sortConfig.key === 'openedDate' || sortConfig.key === 'expirationDate') {
+                    aVal = new Date(a[sortConfig.key]);
+                    bVal = new Date(b[sortConfig.key]);
+                } else {
+                    aVal = a[sortConfig.key];
+                    bVal = b[sortConfig.key];
+                }
+
+                if (aVal < bVal) return sortConfig.direction === 'asc' ? -1 : 1;
+                if (aVal > bVal) return sortConfig.direction === 'asc' ? 1 : -1;
+                return 0;
+            });
+        }
+
+        return result;
+    }, [trades, statusFilter, sortConfig]);
+
     // --- Pagination ---
-    const totalPages = Math.ceil(trades.length / TRADES_PER_PAGE);
+    const totalPages = Math.ceil(filteredAndSortedTrades.length / TRADES_PER_PAGE);
     const paginatedTrades = useMemo(() => {
         const startIndex = (currentPage - 1) * TRADES_PER_PAGE;
-        return trades.slice(startIndex, startIndex + TRADES_PER_PAGE);
-    }, [trades, currentPage]);
+        return filteredAndSortedTrades.slice(startIndex, startIndex + TRADES_PER_PAGE);
+    }, [filteredAndSortedTrades, currentPage]);
+
+    // Sort handler
+    const handleSort = (key) => {
+        setSortConfig(prev => ({
+            key,
+            direction: prev.key === key && prev.direction === 'desc' ? 'asc' : 'desc'
+        }));
+    };
+
+    // Get sort icon for column
+    const getSortIcon = (key) => {
+        if (sortConfig.key !== key) return <ArrowUpDown className="w-3 h-3 opacity-40" />;
+        return sortConfig.direction === 'asc'
+            ? <ArrowUp className="w-3 h-3" />
+            : <ArrowDown className="w-3 h-3" />;
+    };
 
     // Reset to page 1 when trades change significantly
     useEffect(() => {
@@ -328,9 +461,32 @@ export default function App() {
             const response = await fetch(`${API_URL}/trades/${id}`, { method: 'DELETE' });
             if (!response.ok) throw new Error('Failed to delete trade');
             await fetchTrades();
+            showToast('Trade deleted');
         } catch (err) {
             console.error('Error deleting trade:', err);
             setError('Failed to delete trade. Please try again.');
+        }
+    };
+
+    // Quick close trade at $0 (for expired options)
+    const quickCloseTrade = async (trade) => {
+        try {
+            const response = await fetch(`${API_URL}/trades/${trade.id}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    ...trade,
+                    closePrice: 0,
+                    closedDate: new Date().toISOString().split('T')[0],
+                    status: 'Expired',
+                }),
+            });
+            if (!response.ok) throw new Error('Failed to close trade');
+            await fetchTrades();
+            showToast(`${trade.ticker} closed at $0`);
+        } catch (err) {
+            console.error('Error closing trade:', err);
+            setError('Failed to close trade. Please try again.');
         }
     };
 
@@ -507,6 +663,18 @@ export default function App() {
         // Count rolled trades
         const rolledCount = trades.filter(t => t.status === 'Rolled').length;
 
+        // Total premium collected (all trades)
+        const totalPremiumCollected = trades.reduce((acc, t) => {
+            const { totalPremium } = calculateMetrics(t);
+            return acc + totalPremium;
+        }, 0);
+
+        // Best performing ticker
+        const bestTicker = Object.entries(tickerStats).length > 0
+            ? Object.entries(tickerStats).reduce((best, [ticker, pnl]) =>
+                pnl > (best?.pnl || -Infinity) ? { ticker, pnl } : best, null)
+            : null;
+
         return {
             totalPnL,
             tickerStats,
@@ -517,7 +685,9 @@ export default function App() {
             openTradesCount: openTrades.length,
             completedTradesCount: completedTrades.length,
             resolvedChains: resolvedChains.length,
-            rolledCount
+            rolledCount,
+            totalPremiumCollected,
+            bestTicker
         };
     }, [trades]);
 
@@ -539,8 +709,23 @@ export default function App() {
     // --- Chart Data (only completed trades) ---
     const chartData = useMemo(() => {
         // Only include trades that are not Open (completed or rolled)
-        const completedTrades = trades.filter(t => t.status !== 'Open');
+        let completedTrades = trades.filter(t => t.status !== 'Open');
         if (completedTrades.length === 0) return [];
+
+        // Filter by time period
+        const now = new Date();
+        const periodStart = {
+            '1m': new Date(now.getFullYear(), now.getMonth() - 1, now.getDate()),
+            '3m': new Date(now.getFullYear(), now.getMonth() - 3, now.getDate()),
+            '6m': new Date(now.getFullYear(), now.getMonth() - 6, now.getDate()),
+            'ytd': new Date(now.getFullYear(), 0, 1),
+            'all': new Date(0)
+        }[chartPeriod];
+
+        completedTrades = completedTrades.filter(t => {
+            const tradeDate = new Date(t.closedDate || t.expirationDate || t.openedDate);
+            return tradeDate >= periodStart;
+        });
 
         const sortedTrades = [...completedTrades].sort((a, b) => {
             // Sort by closed date if available, otherwise by opened date
@@ -564,19 +749,19 @@ export default function App() {
         });
 
         return data;
-    }, [trades]);
+    }, [trades, chartPeriod]);
 
     const CustomTooltip = ({ active, payload }) => {
         if (active && payload && payload.length) {
             const data = payload[0].payload;
             return (
-                <div className="bg-white p-3 rounded-lg shadow-lg border border-slate-200 text-sm">
-                    <p className="font-semibold text-slate-700">{data.ticker}</p>
-                    <p className="text-slate-500">{formatDate(data.fullDate)}</p>
-                    <p className={`font-mono font-medium ${data.tradePnl >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                <div className="bg-white dark:bg-slate-800 p-3 rounded-md shadow-sm border border-slate-200 dark:border-slate-700 text-sm">
+                    <p className="font-semibold text-slate-700 dark:text-slate-200">{data.ticker}</p>
+                    <p className="text-slate-500 dark:text-slate-400">{formatDate(data.fullDate)}</p>
+                    <p className={`font-mono font-medium ${data.tradePnl >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
                         Trade: {formatCurrency(data.tradePnl)}
                     </p>
-                    <p className={`font-mono font-bold ${data.pnl >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                    <p className={`font-mono font-bold ${data.pnl >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
                         Total: {formatCurrency(data.pnl)}
                     </p>
                 </div>
@@ -587,40 +772,76 @@ export default function App() {
 
     if (loading) {
         return (
-            <div className="flex items-center justify-center min-h-screen bg-slate-50 text-slate-500 font-medium">
-                Loading your wheel...
+            <div className="min-h-screen bg-slate-100 dark:bg-slate-900 p-4 md:p-8">
+                <div className="max-w-7xl mx-auto space-y-6">
+                    {/* Header skeleton */}
+                    <div className="bg-white dark:bg-slate-800 p-6 rounded-lg border border-slate-200 dark:border-slate-700 animate-pulse">
+                        <div className="flex justify-between items-center">
+                            <div className="space-y-2">
+                                <div className="h-6 w-32 bg-slate-200 dark:bg-slate-700 rounded"></div>
+                                <div className="h-4 w-48 bg-slate-200 dark:bg-slate-700 rounded"></div>
+                            </div>
+                            <div className="flex gap-2">
+                                <div className="h-10 w-20 bg-slate-200 dark:bg-slate-700 rounded-lg"></div>
+                                <div className="h-10 w-24 bg-slate-200 dark:bg-slate-700 rounded-lg"></div>
+                            </div>
+                        </div>
+                    </div>
+                    {/* KPI cards skeleton */}
+                    <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                        {[1, 2, 3, 4].map(i => (
+                            <div key={i} className="bg-white dark:bg-slate-800 p-5 rounded-lg border border-slate-200 dark:border-slate-700 animate-pulse">
+                                <div className="h-4 w-24 bg-slate-200 dark:bg-slate-700 rounded mb-3"></div>
+                                <div className="h-8 w-32 bg-slate-200 dark:bg-slate-700 rounded"></div>
+                            </div>
+                        ))}
+                    </div>
+                    {/* Chart skeleton */}
+                    <div className="bg-white dark:bg-slate-800 p-5 rounded-lg border border-slate-200 dark:border-slate-700 animate-pulse">
+                        <div className="h-64 bg-slate-200 dark:bg-slate-700 rounded"></div>
+                    </div>
+                </div>
             </div>
         );
     }
 
     return (
-        <div className="min-h-screen bg-slate-100 p-4 md:p-8 font-sans text-slate-800">
+        <div className="min-h-screen bg-slate-100 dark:bg-slate-900 p-4 md:p-8 font-sans text-slate-800 dark:text-slate-200 transition-colors">
             <div className="max-w-7xl mx-auto space-y-6">
 
                 {/* Error Banner */}
                 {error && (
-                    <div className="bg-red-50 border border-red-200 text-red-600 px-4 py-3 rounded-xl flex items-center justify-between">
+                    <div className="bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 text-red-600 dark:text-red-400 px-4 py-3 rounded-lg flex items-center justify-between">
                         <span>{error}</span>
-                        <button onClick={() => setError(null)} className="text-red-400 hover:text-red-600">
+                        <button onClick={() => setError(null)} className="text-red-400 hover:text-red-600 dark:hover:text-red-300">
                             <X className="w-4 h-4" />
                         </button>
                     </div>
                 )}
 
                 {/* Header */}
-                <header className="flex flex-col md:flex-row justify-between items-start md:items-center bg-white p-6 rounded-xl shadow-sm border border-slate-200">
+                <header className="flex flex-col md:flex-row justify-between items-start md:items-center bg-white dark:bg-slate-800 p-6 rounded-lg shadow-sm border border-slate-200 dark:border-slate-700">
                     <div>
-                        <h1 className="text-2xl font-bold text-slate-900 flex items-center gap-2">
-                            <Activity className="w-6 h-6 text-indigo-600" />
+                        <h1 className="text-2xl font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                            <Activity className="w-6 h-6 text-indigo-600 dark:text-indigo-400" />
                             Optionable
                         </h1>
-                        <p className="text-slate-500 text-sm mt-1">Documenting the Wheel Strategy</p>
+                        <p className="text-slate-500 dark:text-slate-400 text-sm mt-1">Documenting the Wheel Strategy</p>
                     </div>
                     <div className="mt-4 md:mt-0 flex items-center gap-2">
+                        {/* Theme Toggle */}
+                        <button
+                            onClick={() => setDarkMode(!darkMode)}
+                            className="p-2 rounded-lg bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors"
+                            title={darkMode ? 'Switch to light mode' : 'Switch to dark mode'}
+                        >
+                            {darkMode ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+                        </button>
+
                         {/* Export Button */}
                         <button
                             onClick={exportToCSV}
-                            className="flex items-center gap-2 bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-2 rounded-lg font-medium transition-colors"
+                            className="flex items-center gap-2 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-300 px-3 py-2 rounded-lg font-medium transition-colors"
                             title="Export to CSV"
                         >
                             <Download className="w-4 h-4" />
@@ -628,7 +849,7 @@ export default function App() {
                         </button>
 
                         {/* Import Button */}
-                        <label className="flex items-center gap-2 bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-2 rounded-lg font-medium transition-colors cursor-pointer" title="Import from CSV">
+                        <label className="flex items-center gap-2 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-300 px-3 py-2 rounded-lg font-medium transition-colors cursor-pointer" title="Import from CSV">
                             <Upload className="w-4 h-4" />
                             <span className="hidden sm:inline">Import</span>
                             <input
@@ -642,7 +863,7 @@ export default function App() {
                         {/* New Trade Button */}
                         <button
                             onClick={() => openModal()}
-                            className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg font-medium transition-colors shadow-md shadow-indigo-200"
+                            className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 dark:bg-indigo-500 dark:hover:bg-indigo-600 text-white px-4 py-2 rounded-lg font-medium transition-colors"
                         >
                             <Plus className="w-4 h-4" />
                             New Trade
@@ -651,54 +872,93 @@ export default function App() {
                 </header>
 
                 {/* Dashboard Grid */}
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                    <div className="bg-white p-5 rounded-xl shadow-sm border border-slate-200 flex flex-col justify-between">
-                        <span className="text-slate-500 text-sm font-medium uppercase tracking-wide">Profit & Loss</span>
-                        <div className={`text-3xl font-bold mt-2 ${stats.totalPnL >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+                    <div className="bg-white dark:bg-slate-800 p-4 rounded-lg shadow-sm border border-slate-200 dark:border-slate-700 flex flex-col justify-between">
+                        <span className="text-slate-500 dark:text-slate-400 text-xs font-medium uppercase tracking-wide">Total P/L</span>
+                        <div className={`text-2xl font-bold mt-1 ${stats.totalPnL >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
                             {formatCurrency(stats.totalPnL)}
                         </div>
-                        <div className="text-xs text-slate-400 mt-1">For completed trades</div>
+                        <div className="text-xs text-slate-400 dark:text-slate-500 mt-1">{stats.completedTradesCount} closed</div>
                     </div>
 
-                    <div className="bg-white p-5 rounded-xl shadow-sm border border-slate-200 flex flex-col justify-between">
-                        <span className="text-slate-500 text-sm font-medium uppercase tracking-wide">Win Rate</span>
-                        <div className="text-3xl font-bold mt-2 text-indigo-600">
+                    <div className="bg-white dark:bg-slate-800 p-4 rounded-lg shadow-sm border border-slate-200 dark:border-slate-700 flex flex-col justify-between">
+                        <span className="text-slate-500 dark:text-slate-400 text-xs font-medium uppercase tracking-wide">Premium</span>
+                        <div className="text-2xl font-bold mt-1 text-emerald-600 dark:text-emerald-400">
+                            {formatCurrency(stats.totalPremiumCollected)}
+                        </div>
+                        <div className="text-xs text-slate-400 dark:text-slate-500 mt-1">Total collected</div>
+                    </div>
+
+                    <div className="bg-white dark:bg-slate-800 p-4 rounded-lg shadow-sm border border-slate-200 dark:border-slate-700 flex flex-col justify-between">
+                        <span className="text-slate-500 dark:text-slate-400 text-xs font-medium uppercase tracking-wide">Win Rate</span>
+                        <div className="text-2xl font-bold mt-1 text-indigo-600 dark:text-indigo-400">
                             {formatPercent(stats.winRate)}
                         </div>
-                        <div className="text-xs text-slate-400 mt-1">
-                            {stats.resolvedChains} resolved chain{stats.resolvedChains !== 1 ? 's' : ''}
-                            {stats.rolledCount > 0 && ` (${stats.rolledCount} rolled)`}
-                        </div>
+                        <div className="text-xs text-slate-400 dark:text-slate-500 mt-1">{stats.resolvedChains} chains</div>
                     </div>
 
-                    <div className="bg-white p-5 rounded-xl shadow-sm border border-slate-200 flex flex-col justify-between">
-                        <span className="text-slate-500 text-sm font-medium uppercase tracking-wide">Avg ROI</span>
-                        <div className={`text-3xl font-bold mt-2 ${stats.avgRoi >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                    <div className="bg-white dark:bg-slate-800 p-4 rounded-lg shadow-sm border border-slate-200 dark:border-slate-700 flex flex-col justify-between">
+                        <span className="text-slate-500 dark:text-slate-400 text-xs font-medium uppercase tracking-wide">Avg ROI</span>
+                        <div className={`text-2xl font-bold mt-1 ${stats.avgRoi >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
                             {formatPercent(stats.avgRoi)}
                         </div>
-                        <div className="text-xs text-slate-400 mt-1">For completed trades</div>
+                        <div className="text-xs text-slate-400 dark:text-slate-500 mt-1">Per trade</div>
                     </div>
 
-                    <div className="bg-white p-5 rounded-xl shadow-sm border border-slate-200 flex flex-col justify-between">
-                        <span className="text-slate-500 text-sm font-medium uppercase tracking-wide">Capital Deployed</span>
-                        <div className="text-3xl font-bold mt-2 text-slate-700">
+                    <div className="bg-white dark:bg-slate-800 p-4 rounded-lg shadow-sm border border-slate-200 dark:border-slate-700 flex flex-col justify-between">
+                        <span className="text-slate-500 dark:text-slate-400 text-xs font-medium uppercase tracking-wide">Capital</span>
+                        <div className="text-2xl font-bold mt-1 text-slate-700 dark:text-slate-200">
                             {formatCurrency(stats.capitalAtRisk)}
                         </div>
-                        <div className="text-xs text-slate-400 mt-1">Locked collateral for {stats.openTradesCount} open trade{stats.openTradesCount !== 1 ? 's' : ''}</div>
+                        <div className="text-xs text-slate-400 dark:text-slate-500 mt-1">{stats.openTradesCount} open</div>
+                    </div>
+
+                    <div className="bg-white dark:bg-slate-800 p-4 rounded-lg shadow-sm border border-slate-200 dark:border-slate-700 flex flex-col justify-between">
+                        <span className="text-slate-500 dark:text-slate-400 text-xs font-medium uppercase tracking-wide">Best Ticker</span>
+                        <div className="text-2xl font-bold mt-1 text-indigo-600 dark:text-indigo-400">
+                            {stats.bestTicker ? stats.bestTicker.ticker : '—'}
+                        </div>
+                        <div className="text-xs text-slate-400 dark:text-slate-500 mt-1">
+                            {stats.bestTicker ? formatCurrency(stats.bestTicker.pnl) : 'No data'}
+                        </div>
                     </div>
                 </div>
 
                 {/* P/L Chart */}
                 {chartData.length > 0 && (
-                    <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-5">
+                    <div className="bg-white dark:bg-slate-800 rounded-lg shadow-sm border border-slate-200 dark:border-slate-700 p-5">
                         <div className="flex items-center justify-between mb-4">
-                            <h3 className="font-semibold text-slate-700 flex items-center gap-2">
+                            <h3 className="font-semibold text-slate-700 dark:text-slate-200 flex items-center gap-2">
                                 <TrendingUp className="w-4 h-4 text-slate-400" />
                                 Cumulative P/L
                             </h3>
-                            <span className={`text-sm font-mono font-bold ${stats.totalPnL >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
-                                {formatCurrency(stats.totalPnL)}
-                            </span>
+                            <div className="flex items-center gap-3">
+                                {/* Time Period Selector */}
+                                <div className="flex bg-slate-100 dark:bg-slate-700 rounded-lg p-0.5">
+                                    {[
+                                        { key: '1m', label: '1M' },
+                                        { key: '3m', label: '3M' },
+                                        { key: '6m', label: '6M' },
+                                        { key: 'ytd', label: 'YTD' },
+                                        { key: 'all', label: 'All' }
+                                    ].map(period => (
+                                        <button
+                                            key={period.key}
+                                            onClick={() => setChartPeriod(period.key)}
+                                            className={`px-2 py-1 text-xs font-medium rounded-md transition-colors ${
+                                                chartPeriod === period.key
+                                                    ? 'bg-white dark:bg-slate-600 text-slate-900 dark:text-white shadow-sm'
+                                                    : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300'
+                                            }`}
+                                        >
+                                            {period.label}
+                                        </button>
+                                    ))}
+                                </div>
+                                <span className={`text-sm font-mono font-bold ${stats.totalPnL >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
+                                    {formatCurrency(stats.totalPnL)}
+                                </span>
+                            </div>
                         </div>
                         <div className="h-64">
                             <ResponsiveContainer width="100%" height="100%">
@@ -709,17 +969,17 @@ export default function App() {
                                             <stop offset="95%" stopColor={stats.totalPnL >= 0 ? "#10b981" : "#ef4444"} stopOpacity={0} />
                                         </linearGradient>
                                     </defs>
-                                    <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                                    <CartesianGrid strokeDasharray="3 3" stroke={darkMode ? '#334155' : '#e2e8f0'} />
                                     <XAxis
                                         dataKey="date"
-                                        tick={{ fontSize: 11, fill: '#94a3b8' }}
-                                        tickLine={{ stroke: '#e2e8f0' }}
-                                        axisLine={{ stroke: '#e2e8f0' }}
+                                        tick={{ fontSize: 11, fill: darkMode ? '#64748b' : '#94a3b8' }}
+                                        tickLine={{ stroke: darkMode ? '#334155' : '#e2e8f0' }}
+                                        axisLine={{ stroke: darkMode ? '#334155' : '#e2e8f0' }}
                                     />
                                     <YAxis
-                                        tick={{ fontSize: 11, fill: '#94a3b8' }}
-                                        tickLine={{ stroke: '#e2e8f0' }}
-                                        axisLine={{ stroke: '#e2e8f0' }}
+                                        tick={{ fontSize: 11, fill: darkMode ? '#64748b' : '#94a3b8' }}
+                                        tickLine={{ stroke: darkMode ? '#334155' : '#e2e8f0' }}
+                                        axisLine={{ stroke: darkMode ? '#334155' : '#e2e8f0' }}
                                         tickFormatter={(value) => `$${value >= 1000 ? `${(value / 1000).toFixed(1)}k` : value}`}
                                     />
                                     <Tooltip content={<CustomTooltip />} />
@@ -737,43 +997,85 @@ export default function App() {
                     </div>
                 )}
 
-                <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
-
-                    {/* Main Table Area */}
-                    <div className="lg:col-span-3 bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-                        <div className="p-4 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
-                            <h3 className="font-semibold text-slate-700 flex items-center gap-2">
+                {/* Main Table Area - Full Width */}
+                <div className="bg-white dark:bg-slate-800 rounded-lg shadow-sm border border-slate-200 dark:border-slate-700 overflow-hidden">
+                        <div className="p-4 border-b border-slate-100 dark:border-slate-700 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 bg-slate-50/50 dark:bg-slate-800/50">
+                            <h3 className="font-semibold text-slate-700 dark:text-slate-200 flex items-center gap-2">
                                 <Calendar className="w-4 h-4 text-slate-400" />
                                 Trade Log
                             </h3>
-                            <span className="text-xs text-slate-400 font-mono bg-slate-100 px-2 py-1 rounded">
-                                {trades.length} trades
-                            </span>
+                            <div className="flex items-center gap-3">
+                                {/* Status Filter Tabs */}
+                                <div className="flex bg-slate-100 dark:bg-slate-700 rounded-lg p-0.5">
+                                    {[
+                                        { key: 'all', label: 'All' },
+                                        { key: 'open', label: 'Open' },
+                                        { key: 'closed', label: 'Closed' }
+                                    ].map(tab => (
+                                        <button
+                                            key={tab.key}
+                                            onClick={() => { setStatusFilter(tab.key); setCurrentPage(1); }}
+                                            className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${
+                                                statusFilter === tab.key
+                                                    ? 'bg-white dark:bg-slate-600 text-slate-900 dark:text-white shadow-sm'
+                                                    : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300'
+                                            }`}
+                                        >
+                                            {tab.label}
+                                        </button>
+                                    ))}
+                                </div>
+                                {/* Clear Filters Button */}
+                                {(statusFilter !== 'all' || sortConfig.key) && (
+                                    <button
+                                        onClick={() => { setStatusFilter('all'); setSortConfig({ key: null, direction: 'desc' }); setCurrentPage(1); }}
+                                        className="flex items-center gap-1 px-2 py-1 text-xs text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 rounded transition-colors"
+                                    >
+                                        <X className="w-3 h-3" />
+                                        Clear
+                                    </button>
+                                )}
+                                <span className="text-xs text-slate-400 font-mono bg-slate-100 dark:bg-slate-700 px-2 py-1 rounded">
+                                    {filteredAndSortedTrades.length} trades
+                                </span>
+                            </div>
                         </div>
 
-                        <div className="overflow-x-auto">
+                        <div className="overflow-x-auto max-h-[600px]">
                             <table className="w-full text-sm text-left">
-                                <thead className="text-xs text-slate-500 uppercase bg-slate-50 border-b border-slate-100">
+                                <thead className="text-xs text-slate-500 dark:text-slate-400 uppercase bg-slate-50 dark:bg-slate-800 border-b border-slate-100 dark:border-slate-700 sticky top-0 z-10">
                                     <tr>
-                                        <th className="px-3 py-3 font-semibold">Ticker</th>
-                                        <th className="px-3 py-3 font-semibold">Type</th>
-                                        <th className="px-3 py-3 font-semibold">Strike</th>
-                                        <th className="px-3 py-3 font-semibold text-center">Qty</th>
-                                        <th className="px-3 py-3 font-semibold text-center">Delta</th>
-                                        <th className="px-3 py-3 font-semibold">Opened</th>
-                                        <th className="px-3 py-3 font-semibold">Expiry</th>
-                                        <th className="px-3 py-3 font-semibold text-center">DTE</th>
-                                        <th className="px-3 py-3 font-semibold text-right">P/L</th>
-                                        <th className="px-3 py-3 font-semibold text-right">ROI</th>
-                                        <th className="px-3 py-3 font-semibold text-center">Status</th>
-                                        <th className="px-3 py-3 font-semibold text-right">Actions</th>
+                                        <th className="px-3 py-2 font-semibold cursor-pointer hover:text-slate-700 dark:hover:text-slate-200" onClick={() => handleSort('ticker')}>
+                                            <span className="inline-flex items-center gap-1">Ticker {getSortIcon('ticker')}</span>
+                                        </th>
+                                        <th className="px-3 py-2 font-semibold">Type</th>
+                                        <th className="px-3 py-2 font-semibold cursor-pointer hover:text-slate-700 dark:hover:text-slate-200" onClick={() => handleSort('strike')}>
+                                            <span className="inline-flex items-center gap-1">Strike {getSortIcon('strike')}</span>
+                                        </th>
+                                        <th className="px-3 py-2 font-semibold text-center">Qty</th>
+                                        <th className="px-3 py-2 font-semibold text-center">Delta</th>
+                                        <th className="px-3 py-2 font-semibold cursor-pointer hover:text-slate-700 dark:hover:text-slate-200" onClick={() => handleSort('openedDate')}>
+                                            <span className="inline-flex items-center gap-1">Opened {getSortIcon('openedDate')}</span>
+                                        </th>
+                                        <th className="px-3 py-2 font-semibold cursor-pointer hover:text-slate-700 dark:hover:text-slate-200" onClick={() => handleSort('expirationDate')}>
+                                            <span className="inline-flex items-center gap-1">Expiry {getSortIcon('expirationDate')}</span>
+                                        </th>
+                                        <th className="px-3 py-2 font-semibold text-center">DTE</th>
+                                        <th className="px-3 py-2 font-semibold text-right cursor-pointer hover:text-slate-700 dark:hover:text-slate-200" onClick={() => handleSort('pnl')}>
+                                            <span className="inline-flex items-center gap-1 justify-end">P/L {getSortIcon('pnl')}</span>
+                                        </th>
+                                        <th className="px-3 py-2 font-semibold text-right cursor-pointer hover:text-slate-700 dark:hover:text-slate-200" onClick={() => handleSort('roi')}>
+                                            <span className="inline-flex items-center gap-1 justify-end">ROI {getSortIcon('roi')}</span>
+                                        </th>
+                                        <th className="px-3 py-2 font-semibold text-center">Status</th>
+                                        <th className="px-3 py-2 font-semibold text-right">Actions</th>
                                     </tr>
                                 </thead>
-                                <tbody className="divide-y divide-slate-100">
-                                    {trades.length === 0 ? (
+                                <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
+                                    {filteredAndSortedTrades.length === 0 ? (
                                         <tr>
-                                            <td colSpan="12" className="px-4 py-12 text-center text-slate-400">
-                                                No trades yet. Click "New Trade" to start your wheel.
+                                            <td colSpan="12" className="px-4 py-12 text-center text-sm text-slate-400">
+                                                {trades.length === 0 ? "No trades yet. Click \"New Trade\" to start your wheel." : "No trades match the current filter."}
                                             </td>
                                         </tr>
                                     ) : (
@@ -784,8 +1086,8 @@ export default function App() {
                                             const hasParent = chainInfo.childToParent.has(trade.id);
                                             const isPartOfChain = hasChild || hasParent;
                                             return (
-                                                <tr key={trade.id} className="hover:bg-slate-50/80 transition-colors group">
-                                                    <td className="px-3 py-3 font-bold text-slate-700">
+                                                <tr key={trade.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-700/50 transition-colors">
+                                                    <td className="px-3 py-2 text-sm font-semibold text-slate-700 dark:text-slate-200">
                                                         <div className="flex items-center gap-1">
                                                             {trade.ticker.toUpperCase()}
                                                             {isPartOfChain && (
@@ -796,81 +1098,90 @@ export default function App() {
                                                             )}
                                                         </div>
                                                     </td>
-                                                    <td className="px-3 py-3">
-                                                        <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${trade.type === 'CSP'
-                                                            ? 'bg-blue-100 text-blue-700'
-                                                            : 'bg-purple-100 text-purple-700'
+                                                    <td className="px-3 py-2">
+                                                        <span className={`px-2 py-0.5 rounded text-xs font-semibold ${trade.type === 'CSP'
+                                                            ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-400'
+                                                            : 'bg-purple-100 dark:bg-purple-900/40 text-purple-700 dark:text-purple-400'
                                                             }`}>
                                                             {trade.type}
                                                         </span>
                                                     </td>
-                                                    <td className="px-3 py-3 font-mono text-slate-600">${trade.strike}</td>
-                                                    <td className="px-3 py-3 text-center font-mono text-slate-600">{trade.quantity}</td>
-                                                    <td className="px-3 py-3 text-center font-mono text-slate-500">
+                                                    <td className="px-3 py-2 font-mono text-sm text-slate-600 dark:text-slate-300">${trade.strike}</td>
+                                                    <td className="px-3 py-2 text-center font-mono text-sm text-slate-600 dark:text-slate-300">{trade.quantity}</td>
+                                                    <td className="px-3 py-2 text-center font-mono text-sm text-slate-500 dark:text-slate-400">
                                                         {trade.delta ? trade.delta.toFixed(2) : '—'}
                                                     </td>
-                                                    <td className="px-3 py-3 text-xs text-slate-500">
+                                                    <td className="px-3 py-2 text-sm text-slate-500 dark:text-slate-400">
                                                         {formatDateShort(trade.openedDate)}
                                                     </td>
-                                                    <td className="px-3 py-3 text-xs text-slate-500">
+                                                    <td className="px-3 py-2 text-sm text-slate-500 dark:text-slate-400">
                                                         {formatDateShort(trade.expirationDate)}
                                                     </td>
-                                                    <td className="px-3 py-3 text-center">
+                                                    <td className="px-3 py-2 text-center">
                                                         {dte !== null ? (
-                                                            <span className={`font-mono font-medium ${dte <= 3 ? 'text-red-600' :
-                                                                dte <= 7 ? 'text-orange-600' :
-                                                                    'text-slate-600'
+                                                            <span className={`font-mono text-sm font-medium ${dte <= 3 ? 'text-red-600 dark:text-red-400' :
+                                                                dte <= 7 ? 'text-orange-600 dark:text-orange-400' :
+                                                                    'text-slate-600 dark:text-slate-300'
                                                                 }`}>
                                                                 {dte}d
                                                             </span>
                                                         ) : (
-                                                            <span className="text-slate-300">—</span>
+                                                            <span className="text-slate-300 dark:text-slate-600 text-sm">—</span>
                                                         )}
                                                     </td>
-                                                    <td className={`px-3 py-3 text-right font-mono font-medium ${metrics.pnl >= 0 ? 'text-emerald-600' : 'text-red-500'}`}>
+                                                    <td className={`px-3 py-2 text-right font-mono text-sm font-medium ${metrics.pnl >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-500 dark:text-red-400'}`}>
                                                         {formatCurrency(metrics.pnl)}
                                                     </td>
-                                                    <td className={`px-3 py-3 text-right font-mono text-xs ${metrics.roi >= 0 ? 'text-emerald-600' : 'text-red-500'}`}>
+                                                    <td className={`px-3 py-2 text-right font-mono text-sm ${metrics.roi >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-500 dark:text-red-400'}`}>
                                                         {formatPercent(metrics.roi)}
                                                     </td>
-                                                    <td className="px-3 py-3 text-center">
-                                                        <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${trade.status === 'Open' ? 'bg-yellow-100 text-yellow-700' :
-                                                            trade.status === 'Assigned' ? 'bg-orange-100 text-orange-700' :
-                                                                trade.status === 'Expired' ? 'bg-green-100 text-green-700' :
-                                                                    trade.status === 'Rolled' ? 'bg-cyan-100 text-cyan-700' :
-                                                                        'bg-slate-100 text-slate-600'
+                                                    <td className="px-3 py-2 text-center">
+                                                        <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${trade.status === 'Open' ? 'bg-amber-50 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 ring-1 ring-inset ring-amber-600/20' :
+                                                            trade.status === 'Assigned' ? 'bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-300 ring-1 ring-inset ring-slate-600/20' :
+                                                                trade.status === 'Expired' ? 'bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 ring-1 ring-inset ring-emerald-600/20' :
+                                                                    trade.status === 'Rolled' ? 'bg-slate-50 dark:bg-slate-700/50 text-slate-600 dark:text-slate-400 ring-1 ring-inset ring-slate-500/20' :
+                                                                        'bg-slate-50 dark:bg-slate-700/50 text-slate-500 dark:text-slate-400'
                                                             }`}>
                                                             {trade.status}
                                                         </span>
                                                     </td>
-                                                    <td className="px-3 py-3 text-right">
-                                                        <div className="flex justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                    <td className="px-3 py-2 text-right">
+                                                        <div className="flex justify-end gap-1">
                                                             {trade.status === 'Open' && (
-                                                                <button
-                                                                    onClick={() => rollTrade(trade)}
-                                                                    className="p-1 text-slate-400 hover:text-amber-600 hover:bg-amber-50 rounded"
-                                                                    title="Roll trade"
-                                                                >
-                                                                    <RefreshCw className="w-4 h-4" />
-                                                                </button>
+                                                                <>
+                                                                    <button
+                                                                        onClick={() => quickCloseTrade(trade)}
+                                                                        className="p-1.5 text-slate-400 hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-900/30 rounded"
+                                                                        title="Close at $0 (expired)"
+                                                                    >
+                                                                        <Check className="w-4 h-4" />
+                                                                    </button>
+                                                                    <button
+                                                                        onClick={() => rollTrade(trade)}
+                                                                        className="p-1.5 text-slate-400 hover:text-amber-600 dark:hover:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-900/30 rounded"
+                                                                        title="Roll trade"
+                                                                    >
+                                                                        <RefreshCw className="w-4 h-4" />
+                                                                    </button>
+                                                                </>
                                                             )}
                                                             <button
                                                                 onClick={() => duplicateTrade(trade)}
-                                                                className="p-1 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded"
+                                                                className="p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 rounded"
                                                                 title="Duplicate trade"
                                                             >
                                                                 <Copy className="w-4 h-4" />
                                                             </button>
                                                             <button
                                                                 onClick={() => openModal(trade)}
-                                                                className="p-1 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded"
+                                                                className="p-1.5 text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 rounded"
                                                                 title="Edit trade"
                                                             >
                                                                 <Edit2 className="w-4 h-4" />
                                                             </button>
                                                             <button
                                                                 onClick={() => deleteTrade(trade.id)}
-                                                                className="p-1 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded"
+                                                                className="p-1.5 text-slate-400 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30 rounded"
                                                                 title="Delete trade"
                                                             >
                                                                 <Trash2 className="w-4 h-4" />
@@ -887,15 +1198,15 @@ export default function App() {
 
                         {/* Pagination */}
                         {totalPages > 1 && (
-                            <div className="p-4 border-t border-slate-100 flex items-center justify-between bg-slate-50/50">
-                                <div className="text-sm text-slate-500">
-                                    Showing {((currentPage - 1) * TRADES_PER_PAGE) + 1} - {Math.min(currentPage * TRADES_PER_PAGE, trades.length)} of {trades.length}
+                            <div className="p-4 border-t border-slate-100 dark:border-slate-700 flex items-center justify-between bg-slate-50/50 dark:bg-slate-800/50">
+                                <div className="text-sm text-slate-500 dark:text-slate-400">
+                                    Showing {((currentPage - 1) * TRADES_PER_PAGE) + 1} - {Math.min(currentPage * TRADES_PER_PAGE, filteredAndSortedTrades.length)} of {filteredAndSortedTrades.length}
                                 </div>
                                 <div className="flex items-center gap-2">
                                     <button
                                         onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
                                         disabled={currentPage === 1}
-                                        className="p-2 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                                        className="p-2 rounded-lg border border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed"
                                     >
                                         <ChevronLeft className="w-4 h-4" />
                                     </button>
@@ -905,8 +1216,8 @@ export default function App() {
                                                 key={page}
                                                 onClick={() => setCurrentPage(page)}
                                                 className={`w-8 h-8 rounded-lg text-sm font-medium ${page === currentPage
-                                                    ? 'bg-indigo-600 text-white'
-                                                    : 'text-slate-600 hover:bg-slate-100'
+                                                    ? 'bg-indigo-600 dark:bg-indigo-500 text-white'
+                                                    : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700'
                                                     }`}
                                             >
                                                 {page}
@@ -916,104 +1227,119 @@ export default function App() {
                                     <button
                                         onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
                                         disabled={currentPage === totalPages}
-                                        className="p-2 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                                        className="p-2 rounded-lg border border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed"
                                     >
                                         <ChevronRight className="w-4 h-4" />
                                     </button>
                                 </div>
                             </div>
                         )}
+                </div>
+
+                {/* Summary Cards - Horizontal Layout */}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    {/* By Month Table */}
+                    <div className="bg-white dark:bg-slate-800 rounded-lg shadow-sm border border-slate-200 dark:border-slate-700 overflow-hidden">
+                        <div className="p-3 border-b border-slate-100 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-800/50 font-semibold text-sm text-slate-700 dark:text-slate-200">
+                            Monthly P/L
+                        </div>
+                        <div className="overflow-y-auto max-h-48">
+                            {Object.keys(stats.monthlyStats).length === 0 ? (
+                                <div className="px-4 py-6 text-center text-slate-400 text-sm">No data yet</div>
+                            ) : (
+                                <table className="w-full text-sm">
+                                    <tbody className="divide-y divide-slate-50 dark:divide-slate-700">
+                                        {Object.entries(stats.monthlyStats)
+                                            .sort((a, b) => new Date(b[0]) - new Date(a[0]))
+                                            .map(([month, pnl]) => (
+                                                <tr key={month} className="hover:bg-slate-50 dark:hover:bg-slate-700/50">
+                                                    <td className="px-4 py-2 text-sm text-slate-600 dark:text-slate-300">{month}</td>
+                                                    <td className={`px-4 py-2 text-right font-mono text-sm font-medium ${pnl >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
+                                                        {formatCurrency(pnl)}
+                                                    </td>
+                                                </tr>
+                                            ))}
+                                    </tbody>
+                                </table>
+                            )}
+                        </div>
                     </div>
 
-                    {/* Sidebar Summaries */}
-                    <div className="space-y-6">
-
-                        {/* By Month Table */}
-                        <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-                            <div className="p-3 border-b border-slate-100 bg-slate-50/50 font-semibold text-sm text-slate-700">
-                                Monthly P/L
-                            </div>
-                            <div className="overflow-y-auto max-h-60">
-                                {Object.keys(stats.monthlyStats).length === 0 ? (
-                                    <div className="px-4 py-6 text-center text-slate-400 text-sm">No data yet</div>
-                                ) : (
-                                    <table className="w-full text-sm">
-                                        <tbody className="divide-y divide-slate-50">
-                                            {Object.entries(stats.monthlyStats)
-                                                .sort((a, b) => new Date(b[0]) - new Date(a[0]))
-                                                .map(([month, pnl]) => (
-                                                    <tr key={month} className="hover:bg-slate-50">
-                                                        <td className="px-4 py-2 text-slate-600">{month}</td>
-                                                        <td className={`px-4 py-2 text-right font-mono font-medium ${pnl >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
-                                                            {formatCurrency(pnl)}
-                                                        </td>
-                                                    </tr>
-                                                ))}
-                                        </tbody>
-                                    </table>
-                                )}
-                            </div>
+                    {/* By Ticker Table */}
+                    <div className="bg-white dark:bg-slate-800 rounded-lg shadow-sm border border-slate-200 dark:border-slate-700 overflow-hidden">
+                        <div className="p-3 border-b border-slate-100 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-800/50 font-semibold text-sm text-slate-700 dark:text-slate-200">
+                            Ticker P/L
                         </div>
-
-                        {/* By Ticker Table */}
-                        <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-                            <div className="p-3 border-b border-slate-100 bg-slate-50/50 font-semibold text-sm text-slate-700">
-                                Ticker P/L
-                            </div>
-                            <div className="overflow-y-auto max-h-60">
-                                {Object.keys(stats.tickerStats).length === 0 ? (
-                                    <div className="px-4 py-6 text-center text-slate-400 text-sm">No data yet</div>
-                                ) : (
-                                    <table className="w-full text-sm">
-                                        <tbody className="divide-y divide-slate-50">
-                                            {Object.entries(stats.tickerStats)
-                                                .sort((a, b) => b[1] - a[1])
-                                                .map(([ticker, pnl]) => (
-                                                    <tr key={ticker} className="hover:bg-slate-50">
-                                                        <td className="px-4 py-2 font-bold text-slate-700">{ticker}</td>
-                                                        <td className={`px-4 py-2 text-right font-mono font-medium ${pnl >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
-                                                            {formatCurrency(pnl)}
-                                                        </td>
-                                                    </tr>
-                                                ))}
-                                        </tbody>
-                                    </table>
-                                )}
-                            </div>
+                        <div className="overflow-y-auto max-h-48">
+                            {Object.keys(stats.tickerStats).length === 0 ? (
+                                <div className="px-4 py-6 text-center text-slate-400 text-sm">No data yet</div>
+                            ) : (
+                                <table className="w-full text-sm">
+                                    <tbody className="divide-y divide-slate-50 dark:divide-slate-700">
+                                        {Object.entries(stats.tickerStats)
+                                            .sort((a, b) => b[1] - a[1])
+                                            .map(([ticker, pnl]) => (
+                                                <tr key={ticker} className="hover:bg-slate-50 dark:hover:bg-slate-700/50">
+                                                    <td className="px-4 py-2 text-sm font-semibold text-slate-700 dark:text-slate-200">{ticker}</td>
+                                                    <td className={`px-4 py-2 text-right font-mono text-sm font-medium ${pnl >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
+                                                        {formatCurrency(pnl)}
+                                                    </td>
+                                                </tr>
+                                            ))}
+                                    </tbody>
+                                </table>
+                            )}
                         </div>
+                    </div>
 
-                        <div className="bg-gradient-to-br from-indigo-500 to-purple-600 rounded-xl shadow-lg p-4 text-white">
-                            <h4 className="font-bold text-lg mb-1">Wheel Strategy Tips</h4>
-                            <ul className="text-xs space-y-2 opacity-90 list-disc pl-4">
-                                <li>Sell CSPs on red days.</li>
-                                <li>Sell CCs on green days.</li>
-                                <li>Avoid earnings weeks if conservative.</li>
-                                <li>Don't wheel stocks you don't want to own!</li>
-                            </ul>
-                        </div>
-
+                    {/* Tips Card */}
+                    <div className="bg-indigo-50 dark:bg-indigo-900/30 rounded-lg border border-indigo-100 dark:border-indigo-800 p-4">
+                        <h4 className="font-semibold text-sm text-indigo-900 dark:text-indigo-300 mb-3">Wheel Strategy Tips</h4>
+                        <ul className="text-sm space-y-2 text-indigo-700 dark:text-indigo-400 list-disc pl-4">
+                            <li>Sell CSPs on red days.</li>
+                            <li>Sell CCs on green days.</li>
+                            <li>Avoid earnings weeks if conservative.</li>
+                            <li>Don't wheel stocks you don't want to own!</li>
+                        </ul>
                     </div>
                 </div>
 
             </div>
 
+            {/* Toast Notification */}
+            {toast && (
+                <div className={`fixed bottom-4 right-4 z-50 px-4 py-3 rounded-lg shadow-lg border flex items-center gap-2 animate-in slide-in-from-bottom-2 ${
+                    toast.type === 'success'
+                        ? 'bg-emerald-50 dark:bg-emerald-900/90 border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-300'
+                        : toast.type === 'error'
+                        ? 'bg-red-50 dark:bg-red-900/90 border-red-200 dark:border-red-800 text-red-700 dark:text-red-300'
+                        : 'bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300'
+                }`}>
+                    {toast.type === 'success' && <Check className="w-4 h-4" />}
+                    <span className="text-sm font-medium">{toast.message}</span>
+                    <button onClick={() => setToast(null)} className="ml-2 opacity-60 hover:opacity-100">
+                        <X className="w-4 h-4" />
+                    </button>
+                </div>
+            )}
+
             {/* Modal */}
             {isModalOpen && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm overflow-y-auto">
-                    <div className="modal-enter bg-white rounded-2xl shadow-xl w-full max-w-xl overflow-hidden my-8">
-                        <div className="p-5 border-b border-slate-100 flex justify-between items-center bg-slate-50">
+                    <div className="modal-enter bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 shadow-sm w-full max-w-xl overflow-hidden my-8">
+                        <div className="p-5 border-b border-slate-100 dark:border-slate-700 flex justify-between items-center bg-slate-50 dark:bg-slate-800/50">
                             <div>
-                                <h2 className="text-lg font-bold text-slate-800">
+                                <h2 className="text-lg font-bold text-slate-800 dark:text-white">
                                     {editingId ? 'Edit Trade' : isRolling ? 'Roll Trade' : 'New Trade'}
                                 </h2>
                                 {isRolling && rollFromTrade && (
-                                    <p className="text-xs text-amber-600 mt-1 flex items-center gap-1">
+                                    <p className="text-xs text-amber-600 dark:text-amber-400 mt-1 flex items-center gap-1">
                                         <RefreshCw className="w-3 h-3" />
                                         Rolling {rollFromTrade.ticker} ${rollFromTrade.strike} {rollFromTrade.type}
                                     </p>
                                 )}
                             </div>
-                            <button onClick={closeModal} className="text-slate-400 hover:text-slate-600">
+                            <button onClick={closeModal} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-300">
                                 <X className="w-5 h-5" />
                             </button>
                         </div>
@@ -1071,11 +1397,11 @@ export default function App() {
 
                             <div className="grid grid-cols-1">
                                 <div>
-                                    <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Ticker</label>
+                                    <label className="block text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase mb-1">Ticker</label>
                                     <input
                                         type="text" name="ticker" required
                                         value={formData.ticker} onChange={handleInputChange}
-                                        className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 uppercase"
+                                        className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 uppercase bg-white dark:bg-slate-700 text-slate-900 dark:text-white"
                                         placeholder="e.g. SOXL"
                                         readOnly={isRolling}
                                     />
@@ -1084,44 +1410,44 @@ export default function App() {
 
                             <div className="grid grid-cols-3 gap-4">
                                 <div>
-                                    <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Opened</label>
-                                    <input type="date" name="openedDate" required value={formData.openedDate} onChange={handleInputChange} className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm" />
+                                    <label className="block text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase mb-1">Opened</label>
+                                    <input type="date" name="openedDate" required value={formData.openedDate} onChange={handleInputChange} className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg text-sm bg-white dark:bg-slate-700 text-slate-900 dark:text-white" />
                                 </div>
                                 <div>
-                                    <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Expiration *</label>
-                                    <input type="date" name="expirationDate" required value={formData.expirationDate} onChange={handleInputChange} className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm" />
+                                    <label className="block text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase mb-1">Expiration *</label>
+                                    <input type="date" name="expirationDate" required value={formData.expirationDate} onChange={handleInputChange} className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg text-sm bg-white dark:bg-slate-700 text-slate-900 dark:text-white" />
                                 </div>
                                 <div>
-                                    <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Closed (Opt)</label>
-                                    <input type="date" name="closedDate" value={formData.closedDate} onChange={handleInputChange} className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm" />
+                                    <label className="block text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase mb-1">Closed (Opt)</label>
+                                    <input type="date" name="closedDate" value={formData.closedDate} onChange={handleInputChange} className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg text-sm bg-white dark:bg-slate-700 text-slate-900 dark:text-white" />
                                 </div>
                             </div>
 
                             <div className="grid grid-cols-4 gap-4">
                                 <div className="col-span-1">
-                                    <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Type</label>
-                                    <select name="type" value={formData.type} onChange={handleInputChange} className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white" disabled={isRolling}>
+                                    <label className="block text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase mb-1">Type</label>
+                                    <select name="type" value={formData.type} onChange={handleInputChange} className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-900 dark:text-white" disabled={isRolling}>
                                         <option value="CSP">CSP (Put)</option>
                                         <option value="CC">CC (Call)</option>
                                     </select>
                                 </div>
                                 <div className="col-span-1">
-                                    <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">New Strike *</label>
-                                    <input type="number" step="0.5" name="strike" required value={formData.strike} onChange={handleInputChange} className="w-full px-3 py-2 border border-slate-300 rounded-lg" placeholder="0.00" />
+                                    <label className="block text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase mb-1">New Strike *</label>
+                                    <input type="number" step="0.5" name="strike" required value={formData.strike} onChange={handleInputChange} className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-900 dark:text-white" placeholder="0.00" />
                                 </div>
                                 <div className="col-span-1">
-                                    <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Qty</label>
-                                    <input type="number" name="quantity" required value={formData.quantity} onChange={handleInputChange} className="w-full px-3 py-2 border border-slate-300 rounded-lg" />
+                                    <label className="block text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase mb-1">Qty</label>
+                                    <input type="number" name="quantity" required value={formData.quantity} onChange={handleInputChange} className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-900 dark:text-white" />
                                 </div>
                                 <div className="col-span-1">
-                                    <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Delta</label>
-                                    <input type="number" step="0.01" min="0" max="1" name="delta" value={formData.delta} onChange={handleInputChange} className="w-full px-3 py-2 border border-slate-300 rounded-lg" placeholder="0.30" />
+                                    <label className="block text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase mb-1">Delta</label>
+                                    <input type="number" step="0.01" min="0" max="1" name="delta" value={formData.delta} onChange={handleInputChange} className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-900 dark:text-white" placeholder="0.30" />
                                 </div>
                             </div>
 
-                            <div className="grid grid-cols-2 gap-4 bg-slate-50 p-4 rounded-lg border border-slate-100">
+                            <div className="grid grid-cols-2 gap-4 bg-slate-50 dark:bg-slate-700/50 p-4 rounded-lg border border-slate-100 dark:border-slate-600">
                                 <div>
-                                    <label className="block text-xs font-semibold text-slate-500 uppercase mb-1 text-emerald-600">
+                                    <label className="block text-xs font-semibold uppercase mb-1 text-emerald-600 dark:text-emerald-400">
                                         {isRolling ? 'New Premium *' : 'Entry Premium ($)'}
                                     </label>
                                     <div className="relative">
@@ -1129,7 +1455,7 @@ export default function App() {
                                         <input
                                             type="number" step="0.01" name="entryPrice" required
                                             value={formData.entryPrice} onChange={handleInputChange}
-                                            className="w-full pl-7 pr-3 py-2 border border-emerald-200 rounded-lg focus:ring-emerald-500"
+                                            className="w-full pl-7 pr-3 py-2 border border-emerald-200 dark:border-emerald-700 rounded-lg focus:ring-emerald-500 bg-white dark:bg-slate-700 text-slate-900 dark:text-white"
                                             placeholder="Price per share"
                                         />
                                     </div>
@@ -1140,13 +1466,13 @@ export default function App() {
 
                                 {!isRolling && (
                                     <div>
-                                        <label className="block text-xs font-semibold text-slate-500 uppercase mb-1 text-red-500">Close Cost ($)</label>
+                                        <label className="block text-xs font-semibold uppercase mb-1 text-red-500 dark:text-red-400">Close Cost ($)</label>
                                         <div className="relative">
                                             <span className="absolute left-3 top-2 text-slate-400">$</span>
                                             <input
                                                 type="number" step="0.01" name="closePrice"
                                                 value={formData.closePrice} onChange={handleInputChange}
-                                                className="w-full pl-7 pr-3 py-2 border border-red-200 rounded-lg focus:ring-red-500"
+                                                className="w-full pl-7 pr-3 py-2 border border-red-200 dark:border-red-700 rounded-lg focus:ring-red-500 bg-white dark:bg-slate-700 text-slate-900 dark:text-white"
                                                 placeholder="0.00 if open"
                                             />
                                         </div>
@@ -1155,10 +1481,10 @@ export default function App() {
 
                                 {isRolling && (
                                     <div className="flex flex-col justify-center">
-                                        <div className="text-xs text-slate-500 uppercase mb-1">Net Credit/Debit</div>
+                                        <div className="text-xs text-slate-500 dark:text-slate-400 uppercase mb-1">Net Credit/Debit</div>
                                         <div className={`text-xl font-bold ${((Number(formData.entryPrice) || 0) - (Number(rollClosePrice) || 0)) >= 0
-                                            ? 'text-emerald-600'
-                                            : 'text-red-600'
+                                            ? 'text-emerald-600 dark:text-emerald-400'
+                                            : 'text-red-600 dark:text-red-400'
                                             }`}>
                                             {formatCurrency(((Number(formData.entryPrice) || 0) - (Number(rollClosePrice) || 0)) * (formData.quantity || 1) * 100)}
                                         </div>
@@ -1171,7 +1497,7 @@ export default function App() {
 
                             {!isRolling && (
                                 <div>
-                                    <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Status</label>
+                                    <label className="block text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase mb-1">Status</label>
                                     <div className="grid grid-cols-4 gap-2">
                                         {['Open', 'Expired', 'Assigned', 'Closed'].map((s) => (
                                             <button
@@ -1179,21 +1505,21 @@ export default function App() {
                                                 type="button"
                                                 onClick={() => setFormData(prev => ({ ...prev, status: s }))}
                                                 className={`py-2 text-xs font-medium rounded-lg border ${formData.status === s
-                                                    ? 'bg-indigo-600 text-white border-indigo-600'
-                                                    : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                                                    ? 'bg-indigo-600 dark:bg-indigo-500 text-white border-indigo-600 dark:border-indigo-500'
+                                                    : 'bg-white dark:bg-slate-700 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-600 hover:bg-slate-50 dark:hover:bg-slate-600'
                                                     }`}
                                             >
                                                 {s}
                                             </button>
                                         ))}
                                     </div>
-                                    <p className="text-[10px] text-slate-400 mt-1">Use the 🔄 Roll button to roll a trade</p>
+                                    <p className="text-[10px] text-slate-400 mt-1">Use the Roll button to roll a trade</p>
                                 </div>
                             )}
 
                             <div className="pt-4 flex gap-3">
-                                <button type="button" onClick={closeModal} className="flex-1 px-4 py-2 border border-slate-300 rounded-lg text-slate-700 font-medium hover:bg-slate-50">Cancel</button>
-                                <button type="submit" className="flex-1 px-4 py-2 bg-indigo-600 rounded-lg text-white font-bold hover:bg-indigo-700 shadow-lg shadow-indigo-200">
+                                <button type="button" onClick={closeModal} className="flex-1 px-4 py-2 border border-slate-300 dark:border-slate-600 rounded-lg text-slate-700 dark:text-slate-300 font-medium hover:bg-slate-50 dark:hover:bg-slate-700">Cancel</button>
+                                <button type="submit" className="flex-1 px-4 py-2 bg-indigo-600 dark:bg-indigo-500 rounded-lg text-white font-semibold hover:bg-indigo-700 dark:hover:bg-indigo-600">
                                     {editingId ? 'Update Trade' : isRolling ? 'Roll & Create New' : 'Save Trade'}
                                 </button>
                             </div>

@@ -5,8 +5,55 @@
 @tailwind utilities;
 
 :root {
+  /* Typography */
   --font-sans: 'Plus Jakarta Sans', system-ui, sans-serif;
   --font-mono: 'JetBrains Mono', monospace;
+
+  /* Font Size System (stick to these 4 sizes):
+   * text-xs  (12px) - badges, labels, metadata
+   * text-sm  (14px) - body text, table content, buttons
+   * text-base (16px) - section headings, important text
+   * text-2xl (24px) - KPI numbers, large values
+   */
+
+  /* Borders */
+  --border-color: rgba(0, 0, 0, 0.08);
+  --border-color-strong: rgba(0, 0, 0, 0.12);
+
+  /* Shadows - subtle single shadow approach */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
+  --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.08);
+
+  /* Border Radius - sharp system for financial tools */
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+
+  /* Spacing (4px grid) */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-6: 24px;
+  --space-8: 32px;
+}
+
+/* Dark mode tokens */
+.dark {
+  --border-color: rgba(255, 255, 255, 0.1);
+  --border-color-strong: rgba(255, 255, 255, 0.15);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.4);
+  color-scheme: dark;
+}
+
+/* Force dark mode background when .dark class is on html */
+html.dark {
+  background-color: #0f172a;
+}
+
+html.dark body {
+  background-color: #0f172a;
 }
 
 body {
@@ -19,7 +66,7 @@ body {
   font-family: var(--font-mono);
 }
 
-/* Custom scrollbar */
+/* Custom scrollbar - Light mode */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
@@ -36,6 +83,19 @@ body {
 
 ::-webkit-scrollbar-thumb:hover {
   background: #94a3b8;
+}
+
+/* Custom scrollbar - Dark mode */
+.dark ::-webkit-scrollbar-track {
+  background: #1e293b;
+}
+
+.dark ::-webkit-scrollbar-thumb {
+  background: #475569;
+}
+
+.dark ::-webkit-scrollbar-thumb:hover {
+  background: #64748b;
 }
 
 /* Input focus states */
