@@ -1,47 +1,20 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import {
-    Plus,
-    Trash2,
-    Edit2,
-    Activity,
-    Calendar,
-    X,
-    TrendingUp,
-    Copy,
-    ChevronLeft,
-    ChevronRight,
-    RefreshCw,
-    Link2,
-    Download,
-    Upload,
-    Moon,
-    Sun,
-    Check,
-    ArrowUpDown,
-    ArrowUp,
-    ArrowDown,
-    DollarSign,
-    Target,
-    Clock,
-    Keyboard
-} from 'lucide-react';
-import {
-    AreaChart,
-    Area,
-    XAxis,
-    YAxis,
-    CartesianGrid,
-    Tooltip,
-    ResponsiveContainer
-} from 'recharts';
+import { X, RefreshCw } from 'lucide-react';
 
 // Shared utilities
 import { API_URL, TRADES_PER_PAGE } from './utils/constants';
-import { formatDate, formatDateShort, formatCurrency, formatPercent } from './utils/formatters';
-import { calculateDTE, calculateMetrics } from './utils/calculations';
+import { formatCurrency } from './utils/formatters';
+import { calculateMetrics, calculateDaysHeld } from './utils/calculations';
 
 // Components
-import { Toast } from './components/ui/Toast';
+import {
+    Toast,
+    Header,
+    Dashboard,
+    PnLChart,
+    TradeTable,
+    SummaryCards
+} from './components';
 
 // --- Main Component ---
 export default function App() {
@@ -206,22 +179,6 @@ export default function App() {
         const startIndex = (currentPage - 1) * TRADES_PER_PAGE;
         return filteredAndSortedTrades.slice(startIndex, startIndex + TRADES_PER_PAGE);
     }, [filteredAndSortedTrades, currentPage]);
-
-    // Sort handler
-    const handleSort = (key) => {
-        setSortConfig(prev => ({
-            key,
-            direction: prev.key === key && prev.direction === 'desc' ? 'asc' : 'desc'
-        }));
-    };
-
-    // Get sort icon for column
-    const getSortIcon = (key) => {
-        if (sortConfig.key !== key) return <ArrowUpDown className="w-3 h-3 opacity-40" />;
-        return sortConfig.direction === 'asc'
-            ? <ArrowUp className="w-3 h-3" />
-            : <ArrowDown className="w-3 h-3" />;
-    };
 
     // Reset to page 1 when trades change significantly
     useEffect(() => {
@@ -692,25 +649,6 @@ export default function App() {
         return data;
     }, [trades, chartPeriod]);
 
-    const CustomTooltip = ({ active, payload }) => {
-        if (active && payload && payload.length) {
-            const data = payload[0].payload;
-            return (
-                <div className="bg-white dark:bg-slate-800 p-3 rounded-md shadow-sm border border-slate-200 dark:border-slate-700 text-sm">
-                    <p className="font-semibold text-slate-700 dark:text-slate-200">{data.ticker}</p>
-                    <p className="text-slate-500 dark:text-slate-400">{formatDate(data.fullDate)}</p>
-                    <p className={`font-mono font-medium ${data.tradePnl >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
-                        Trade: {formatCurrency(data.tradePnl)}
-                    </p>
-                    <p className={`font-mono font-bold ${data.pnl >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
-                        Total: {formatCurrency(data.pnl)}
-                    </p>
-                </div>
-            );
-        }
-        return null;
-    };
-
     if (loading) {
         return (
             <div className="min-h-screen bg-slate-100 dark:bg-slate-900 p-4 md:p-8">
@@ -761,489 +699,48 @@ export default function App() {
                 )}
 
                 {/* Header */}
-                <header className="flex flex-col md:flex-row justify-between items-start md:items-center bg-white dark:bg-slate-800 p-6 rounded-lg shadow-sm border border-slate-200 dark:border-slate-700">
-                    <div>
-                        <h1 className="text-2xl font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                            <Activity className="w-6 h-6 text-indigo-600 dark:text-indigo-400" />
-                            Optionable
-                        </h1>
-                        <p className="text-slate-500 dark:text-slate-400 text-sm mt-1">Documenting the Wheel Strategy</p>
-                    </div>
-                    <div className="mt-4 md:mt-0 flex items-center gap-2">
-                        {/* Theme Toggle */}
-                        <button
-                            onClick={() => setDarkMode(!darkMode)}
-                            className="p-2 rounded-lg bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors"
-                            title={darkMode ? 'Switch to light mode' : 'Switch to dark mode'}
-                        >
-                            {darkMode ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
-                        </button>
-
-                        {/* Export Button */}
-                        <button
-                            onClick={exportToCSV}
-                            className="flex items-center gap-2 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-300 px-3 py-2 rounded-lg font-medium transition-colors"
-                            title="Export to CSV"
-                        >
-                            <Download className="w-4 h-4" />
-                            <span className="hidden sm:inline">Export</span>
-                        </button>
-
-                        {/* Import Button */}
-                        <label className="flex items-center gap-2 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-300 px-3 py-2 rounded-lg font-medium transition-colors cursor-pointer" title="Import from CSV">
-                            <Upload className="w-4 h-4" />
-                            <span className="hidden sm:inline">Import</span>
-                            <input
-                                type="file"
-                                accept=".csv"
-                                onChange={importFromCSV}
-                                className="hidden"
-                            />
-                        </label>
-
-                        {/* New Trade Button */}
-                        <button
-                            onClick={() => openModal()}
-                            className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 dark:bg-indigo-500 dark:hover:bg-indigo-600 text-white px-4 py-2 rounded-lg font-medium transition-colors"
-                        >
-                            <Plus className="w-4 h-4" />
-                            New Trade
-                        </button>
-                    </div>
-                </header>
+                <Header
+                    darkMode={darkMode}
+                    onToggleTheme={() => setDarkMode(!darkMode)}
+                    onExport={exportToCSV}
+                    onImport={importFromCSV}
+                    onNewTrade={() => openModal()}
+                />
 
                 {/* Dashboard Grid */}
-                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
-                    <div className="bg-white dark:bg-slate-800 p-4 rounded-lg shadow-sm border border-slate-200 dark:border-slate-700 flex flex-col justify-between">
-                        <span className="text-slate-500 dark:text-slate-400 text-xs font-medium uppercase tracking-wide">Total P/L</span>
-                        <div className={`text-2xl font-bold mt-1 ${stats.totalPnL >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
-                            {formatCurrency(stats.totalPnL)}
-                        </div>
-                        <div className="text-xs text-slate-400 dark:text-slate-500 mt-1">{stats.completedTradesCount} closed</div>
-                    </div>
-
-                    <div className="bg-white dark:bg-slate-800 p-4 rounded-lg shadow-sm border border-slate-200 dark:border-slate-700 flex flex-col justify-between">
-                        <span className="text-slate-500 dark:text-slate-400 text-xs font-medium uppercase tracking-wide">Premium</span>
-                        <div className="text-2xl font-bold mt-1 text-emerald-600 dark:text-emerald-400">
-                            {formatCurrency(stats.totalPremiumCollected)}
-                        </div>
-                        <div className="text-xs text-slate-400 dark:text-slate-500 mt-1">Total collected</div>
-                    </div>
-
-                    <div className="bg-white dark:bg-slate-800 p-4 rounded-lg shadow-sm border border-slate-200 dark:border-slate-700 flex flex-col justify-between">
-                        <span className="text-slate-500 dark:text-slate-400 text-xs font-medium uppercase tracking-wide">Win Rate</span>
-                        <div className="text-2xl font-bold mt-1 text-indigo-600 dark:text-indigo-400">
-                            {formatPercent(stats.winRate)}
-                        </div>
-                        <div className="text-xs text-slate-400 dark:text-slate-500 mt-1">{stats.resolvedChains} chains</div>
-                    </div>
-
-                    <div className="bg-white dark:bg-slate-800 p-4 rounded-lg shadow-sm border border-slate-200 dark:border-slate-700 flex flex-col justify-between">
-                        <span className="text-slate-500 dark:text-slate-400 text-xs font-medium uppercase tracking-wide">Avg ROI</span>
-                        <div className={`text-2xl font-bold mt-1 ${stats.avgRoi >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
-                            {formatPercent(stats.avgRoi)}
-                        </div>
-                        <div className="text-xs text-slate-400 dark:text-slate-500 mt-1">Per trade</div>
-                    </div>
-
-                    <div className="bg-white dark:bg-slate-800 p-4 rounded-lg shadow-sm border border-slate-200 dark:border-slate-700 flex flex-col justify-between">
-                        <span className="text-slate-500 dark:text-slate-400 text-xs font-medium uppercase tracking-wide">Capital</span>
-                        <div className="text-2xl font-bold mt-1 text-slate-700 dark:text-slate-200">
-                            {formatCurrency(stats.capitalAtRisk)}
-                        </div>
-                        <div className="text-xs text-slate-400 dark:text-slate-500 mt-1">{stats.openTradesCount} open</div>
-                    </div>
-
-                    <div className="bg-white dark:bg-slate-800 p-4 rounded-lg shadow-sm border border-slate-200 dark:border-slate-700 flex flex-col justify-between">
-                        <span className="text-slate-500 dark:text-slate-400 text-xs font-medium uppercase tracking-wide">Best Ticker</span>
-                        <div className="text-2xl font-bold mt-1 text-indigo-600 dark:text-indigo-400">
-                            {stats.bestTicker ? stats.bestTicker.ticker : '—'}
-                        </div>
-                        <div className="text-xs text-slate-400 dark:text-slate-500 mt-1">
-                            {stats.bestTicker ? formatCurrency(stats.bestTicker.pnl) : 'No data'}
-                        </div>
-                    </div>
-                </div>
+                <Dashboard stats={stats} />
 
                 {/* P/L Chart */}
-                {chartData.length > 0 && (
-                    <div className="bg-white dark:bg-slate-800 rounded-lg shadow-sm border border-slate-200 dark:border-slate-700 p-5">
-                        <div className="flex items-center justify-between mb-4">
-                            <h3 className="font-semibold text-slate-700 dark:text-slate-200 flex items-center gap-2">
-                                <TrendingUp className="w-4 h-4 text-slate-400" />
-                                Cumulative P/L
-                            </h3>
-                            <div className="flex items-center gap-3">
-                                {/* Time Period Selector */}
-                                <div className="flex bg-slate-100 dark:bg-slate-700 rounded-lg p-0.5">
-                                    {[
-                                        { key: '1m', label: '1M' },
-                                        { key: '3m', label: '3M' },
-                                        { key: '6m', label: '6M' },
-                                        { key: 'ytd', label: 'YTD' },
-                                        { key: 'all', label: 'All' }
-                                    ].map(period => (
-                                        <button
-                                            key={period.key}
-                                            onClick={() => setChartPeriod(period.key)}
-                                            className={`px-2 py-1 text-xs font-medium rounded-md transition-colors ${
-                                                chartPeriod === period.key
-                                                    ? 'bg-white dark:bg-slate-600 text-slate-900 dark:text-white shadow-sm'
-                                                    : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300'
-                                            }`}
-                                        >
-                                            {period.label}
-                                        </button>
-                                    ))}
-                                </div>
-                                <span className={`text-sm font-mono font-bold ${stats.totalPnL >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
-                                    {formatCurrency(stats.totalPnL)}
-                                </span>
-                            </div>
-                        </div>
-                        <div className="h-64">
-                            <ResponsiveContainer width="100%" height="100%">
-                                <AreaChart data={chartData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
-                                    <defs>
-                                        <linearGradient id="colorPnl" x1="0" y1="0" x2="0" y2="1">
-                                            <stop offset="5%" stopColor={stats.totalPnL >= 0 ? "#10b981" : "#ef4444"} stopOpacity={0.3} />
-                                            <stop offset="95%" stopColor={stats.totalPnL >= 0 ? "#10b981" : "#ef4444"} stopOpacity={0} />
-                                        </linearGradient>
-                                    </defs>
-                                    <CartesianGrid strokeDasharray="3 3" stroke={darkMode ? '#334155' : '#e2e8f0'} />
-                                    <XAxis
-                                        dataKey="date"
-                                        tick={{ fontSize: 11, fill: darkMode ? '#64748b' : '#94a3b8' }}
-                                        tickLine={{ stroke: darkMode ? '#334155' : '#e2e8f0' }}
-                                        axisLine={{ stroke: darkMode ? '#334155' : '#e2e8f0' }}
-                                    />
-                                    <YAxis
-                                        tick={{ fontSize: 11, fill: darkMode ? '#64748b' : '#94a3b8' }}
-                                        tickLine={{ stroke: darkMode ? '#334155' : '#e2e8f0' }}
-                                        axisLine={{ stroke: darkMode ? '#334155' : '#e2e8f0' }}
-                                        tickFormatter={(value) => `$${value >= 1000 ? `${(value / 1000).toFixed(1)}k` : value}`}
-                                    />
-                                    <Tooltip content={<CustomTooltip />} />
-                                    <Area
-                                        type="monotone"
-                                        dataKey="pnl"
-                                        stroke={stats.totalPnL >= 0 ? "#10b981" : "#ef4444"}
-                                        strokeWidth={2}
-                                        fillOpacity={1}
-                                        fill="url(#colorPnl)"
-                                    />
-                                </AreaChart>
-                            </ResponsiveContainer>
-                        </div>
-                    </div>
-                )}
+                <PnLChart
+                    chartData={chartData}
+                    chartPeriod={chartPeriod}
+                    onPeriodChange={setChartPeriod}
+                    totalPnL={stats.totalPnL}
+                    darkMode={darkMode}
+                />
 
-                {/* Main Table Area - Full Width */}
-                <div className="bg-white dark:bg-slate-800 rounded-lg shadow-sm border border-slate-200 dark:border-slate-700 overflow-hidden">
-                        <div className="p-4 border-b border-slate-100 dark:border-slate-700 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 bg-slate-50/50 dark:bg-slate-800/50">
-                            <h3 className="font-semibold text-slate-700 dark:text-slate-200 flex items-center gap-2">
-                                <Calendar className="w-4 h-4 text-slate-400" />
-                                Trade Log
-                            </h3>
-                            <div className="flex items-center gap-3">
-                                {/* Status Filter Tabs */}
-                                <div className="flex bg-slate-100 dark:bg-slate-700 rounded-lg p-0.5">
-                                    {[
-                                        { key: 'all', label: 'All' },
-                                        { key: 'open', label: 'Open' },
-                                        { key: 'closed', label: 'Closed' }
-                                    ].map(tab => (
-                                        <button
-                                            key={tab.key}
-                                            onClick={() => { setStatusFilter(tab.key); setCurrentPage(1); }}
-                                            className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${
-                                                statusFilter === tab.key
-                                                    ? 'bg-white dark:bg-slate-600 text-slate-900 dark:text-white shadow-sm'
-                                                    : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300'
-                                            }`}
-                                        >
-                                            {tab.label}
-                                        </button>
-                                    ))}
-                                </div>
-                                {/* Clear Filters Button */}
-                                {(statusFilter !== 'all' || sortConfig.key) && (
-                                    <button
-                                        onClick={() => { setStatusFilter('all'); setSortConfig({ key: null, direction: 'desc' }); setCurrentPage(1); }}
-                                        className="flex items-center gap-1 px-2 py-1 text-xs text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 rounded transition-colors"
-                                    >
-                                        <X className="w-3 h-3" />
-                                        Clear
-                                    </button>
-                                )}
-                                <span className="text-xs text-slate-400 font-mono bg-slate-100 dark:bg-slate-700 px-2 py-1 rounded">
-                                    {filteredAndSortedTrades.length} trades
-                                </span>
-                            </div>
-                        </div>
+                {/* Trade Table */}
+                <TradeTable
+                    trades={trades}
+                    filteredAndSortedTrades={filteredAndSortedTrades}
+                    paginatedTrades={paginatedTrades}
+                    chainInfo={chainInfo}
+                    statusFilter={statusFilter}
+                    setStatusFilter={setStatusFilter}
+                    sortConfig={sortConfig}
+                    setSortConfig={setSortConfig}
+                    currentPage={currentPage}
+                    setCurrentPage={setCurrentPage}
+                    totalPages={totalPages}
+                    onQuickClose={quickCloseTrade}
+                    onRoll={rollTrade}
+                    onDuplicate={duplicateTrade}
+                    onEdit={openModal}
+                    onDelete={deleteTrade}
+                />
 
-                        <div className="overflow-x-auto max-h-[600px]">
-                            <table className="w-full text-sm text-left">
-                                <thead className="text-xs text-slate-500 dark:text-slate-400 uppercase bg-slate-50 dark:bg-slate-800 border-b border-slate-100 dark:border-slate-700 sticky top-0 z-10">
-                                    <tr>
-                                        <th className="px-3 py-2 font-semibold cursor-pointer hover:text-slate-700 dark:hover:text-slate-200" onClick={() => handleSort('ticker')}>
-                                            <span className="inline-flex items-center gap-1">Ticker {getSortIcon('ticker')}</span>
-                                        </th>
-                                        <th className="px-3 py-2 font-semibold">Type</th>
-                                        <th className="px-3 py-2 font-semibold cursor-pointer hover:text-slate-700 dark:hover:text-slate-200" onClick={() => handleSort('strike')}>
-                                            <span className="inline-flex items-center gap-1">Strike {getSortIcon('strike')}</span>
-                                        </th>
-                                        <th className="px-3 py-2 font-semibold text-center">Qty</th>
-                                        <th className="px-3 py-2 font-semibold text-center">Delta</th>
-                                        <th className="px-3 py-2 font-semibold cursor-pointer hover:text-slate-700 dark:hover:text-slate-200" onClick={() => handleSort('openedDate')}>
-                                            <span className="inline-flex items-center gap-1">Opened {getSortIcon('openedDate')}</span>
-                                        </th>
-                                        <th className="px-3 py-2 font-semibold cursor-pointer hover:text-slate-700 dark:hover:text-slate-200" onClick={() => handleSort('expirationDate')}>
-                                            <span className="inline-flex items-center gap-1">Expiry {getSortIcon('expirationDate')}</span>
-                                        </th>
-                                        <th className="px-3 py-2 font-semibold text-center">DTE</th>
-                                        <th className="px-3 py-2 font-semibold text-right cursor-pointer hover:text-slate-700 dark:hover:text-slate-200" onClick={() => handleSort('pnl')}>
-                                            <span className="inline-flex items-center gap-1 justify-end">P/L {getSortIcon('pnl')}</span>
-                                        </th>
-                                        <th className="px-3 py-2 font-semibold text-right cursor-pointer hover:text-slate-700 dark:hover:text-slate-200" onClick={() => handleSort('roi')}>
-                                            <span className="inline-flex items-center gap-1 justify-end">ROI {getSortIcon('roi')}</span>
-                                        </th>
-                                        <th className="px-3 py-2 font-semibold text-center">Status</th>
-                                        <th className="px-3 py-2 font-semibold text-right">Actions</th>
-                                    </tr>
-                                </thead>
-                                <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
-                                    {filteredAndSortedTrades.length === 0 ? (
-                                        <tr>
-                                            <td colSpan="12" className="px-4 py-12 text-center text-sm text-slate-400">
-                                                {trades.length === 0 ? "No trades yet. Click \"New Trade\" to start your wheel." : "No trades match the current filter."}
-                                            </td>
-                                        </tr>
-                                    ) : (
-                                        paginatedTrades.map((trade) => {
-                                            const metrics = calculateMetrics(trade);
-                                            const dte = calculateDTE(trade.expirationDate, trade.status);
-                                            const hasChild = chainInfo.parentToChild.has(trade.id);
-                                            const hasParent = chainInfo.childToParent.has(trade.id);
-                                            const isPartOfChain = hasChild || hasParent;
-                                            return (
-                                                <tr key={trade.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-700/50 transition-colors">
-                                                    <td className="px-3 py-2 text-sm font-semibold text-slate-700 dark:text-slate-200">
-                                                        <div className="flex items-center gap-1">
-                                                            {trade.ticker.toUpperCase()}
-                                                            {isPartOfChain && (
-                                                                <Link2
-                                                                    className="w-3 h-3 text-amber-500"
-                                                                    title={hasParent ? "Rolled from previous" : "Rolled to next"}
-                                                                />
-                                                            )}
-                                                        </div>
-                                                    </td>
-                                                    <td className="px-3 py-2">
-                                                        <span className={`px-2 py-0.5 rounded text-xs font-semibold ${trade.type === 'CSP'
-                                                            ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-400'
-                                                            : 'bg-purple-100 dark:bg-purple-900/40 text-purple-700 dark:text-purple-400'
-                                                            }`}>
-                                                            {trade.type}
-                                                        </span>
-                                                    </td>
-                                                    <td className="px-3 py-2 font-mono text-sm text-slate-600 dark:text-slate-300">${trade.strike}</td>
-                                                    <td className="px-3 py-2 text-center font-mono text-sm text-slate-600 dark:text-slate-300">{trade.quantity}</td>
-                                                    <td className="px-3 py-2 text-center font-mono text-sm text-slate-500 dark:text-slate-400">
-                                                        {trade.delta ? trade.delta.toFixed(2) : '—'}
-                                                    </td>
-                                                    <td className="px-3 py-2 text-sm text-slate-500 dark:text-slate-400">
-                                                        {formatDateShort(trade.openedDate)}
-                                                    </td>
-                                                    <td className="px-3 py-2 text-sm text-slate-500 dark:text-slate-400">
-                                                        {formatDateShort(trade.expirationDate)}
-                                                    </td>
-                                                    <td className="px-3 py-2 text-center">
-                                                        {dte !== null ? (
-                                                            <span className={`font-mono text-sm font-medium ${dte <= 3 ? 'text-red-600 dark:text-red-400' :
-                                                                dte <= 7 ? 'text-orange-600 dark:text-orange-400' :
-                                                                    'text-slate-600 dark:text-slate-300'
-                                                                }`}>
-                                                                {dte}d
-                                                            </span>
-                                                        ) : (
-                                                            <span className="text-slate-300 dark:text-slate-600 text-sm">—</span>
-                                                        )}
-                                                    </td>
-                                                    <td className={`px-3 py-2 text-right font-mono text-sm font-medium ${metrics.pnl >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-500 dark:text-red-400'}`}>
-                                                        {formatCurrency(metrics.pnl)}
-                                                    </td>
-                                                    <td className={`px-3 py-2 text-right font-mono text-sm ${metrics.roi >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-500 dark:text-red-400'}`}>
-                                                        {formatPercent(metrics.roi)}
-                                                    </td>
-                                                    <td className="px-3 py-2 text-center">
-                                                        <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${trade.status === 'Open' ? 'bg-amber-50 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 ring-1 ring-inset ring-amber-600/20' :
-                                                            trade.status === 'Assigned' ? 'bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-300 ring-1 ring-inset ring-slate-600/20' :
-                                                                trade.status === 'Expired' ? 'bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 ring-1 ring-inset ring-emerald-600/20' :
-                                                                    trade.status === 'Rolled' ? 'bg-slate-50 dark:bg-slate-700/50 text-slate-600 dark:text-slate-400 ring-1 ring-inset ring-slate-500/20' :
-                                                                        'bg-slate-50 dark:bg-slate-700/50 text-slate-500 dark:text-slate-400'
-                                                            }`}>
-                                                            {trade.status}
-                                                        </span>
-                                                    </td>
-                                                    <td className="px-3 py-2 text-right">
-                                                        <div className="flex justify-end gap-1">
-                                                            {trade.status === 'Open' && (
-                                                                <>
-                                                                    <button
-                                                                        onClick={() => quickCloseTrade(trade)}
-                                                                        className="p-1.5 text-slate-400 hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-900/30 rounded"
-                                                                        title="Close at $0 (expired)"
-                                                                    >
-                                                                        <Check className="w-4 h-4" />
-                                                                    </button>
-                                                                    <button
-                                                                        onClick={() => rollTrade(trade)}
-                                                                        className="p-1.5 text-slate-400 hover:text-amber-600 dark:hover:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-900/30 rounded"
-                                                                        title="Roll trade"
-                                                                    >
-                                                                        <RefreshCw className="w-4 h-4" />
-                                                                    </button>
-                                                                </>
-                                                            )}
-                                                            <button
-                                                                onClick={() => duplicateTrade(trade)}
-                                                                className="p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 rounded"
-                                                                title="Duplicate trade"
-                                                            >
-                                                                <Copy className="w-4 h-4" />
-                                                            </button>
-                                                            <button
-                                                                onClick={() => openModal(trade)}
-                                                                className="p-1.5 text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 rounded"
-                                                                title="Edit trade"
-                                                            >
-                                                                <Edit2 className="w-4 h-4" />
-                                                            </button>
-                                                            <button
-                                                                onClick={() => deleteTrade(trade.id)}
-                                                                className="p-1.5 text-slate-400 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30 rounded"
-                                                                title="Delete trade"
-                                                            >
-                                                                <Trash2 className="w-4 h-4" />
-                                                            </button>
-                                                        </div>
-                                                    </td>
-                                                </tr>
-                                            );
-                                        })
-                                    )}
-                                </tbody>
-                            </table>
-                        </div>
-
-                        {/* Pagination */}
-                        {totalPages > 1 && (
-                            <div className="p-4 border-t border-slate-100 dark:border-slate-700 flex items-center justify-between bg-slate-50/50 dark:bg-slate-800/50">
-                                <div className="text-sm text-slate-500 dark:text-slate-400">
-                                    Showing {((currentPage - 1) * TRADES_PER_PAGE) + 1} - {Math.min(currentPage * TRADES_PER_PAGE, filteredAndSortedTrades.length)} of {filteredAndSortedTrades.length}
-                                </div>
-                                <div className="flex items-center gap-2">
-                                    <button
-                                        onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
-                                        disabled={currentPage === 1}
-                                        className="p-2 rounded-lg border border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed"
-                                    >
-                                        <ChevronLeft className="w-4 h-4" />
-                                    </button>
-                                    <div className="flex items-center gap-1">
-                                        {Array.from({ length: totalPages }, (_, i) => i + 1).map(page => (
-                                            <button
-                                                key={page}
-                                                onClick={() => setCurrentPage(page)}
-                                                className={`w-8 h-8 rounded-lg text-sm font-medium ${page === currentPage
-                                                    ? 'bg-indigo-600 dark:bg-indigo-500 text-white'
-                                                    : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700'
-                                                    }`}
-                                            >
-                                                {page}
-                                            </button>
-                                        ))}
-                                    </div>
-                                    <button
-                                        onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
-                                        disabled={currentPage === totalPages}
-                                        className="p-2 rounded-lg border border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed"
-                                    >
-                                        <ChevronRight className="w-4 h-4" />
-                                    </button>
-                                </div>
-                            </div>
-                        )}
-                </div>
-
-                {/* Summary Cards - Horizontal Layout */}
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    {/* By Month Table */}
-                    <div className="bg-white dark:bg-slate-800 rounded-lg shadow-sm border border-slate-200 dark:border-slate-700 overflow-hidden">
-                        <div className="p-3 border-b border-slate-100 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-800/50 font-semibold text-sm text-slate-700 dark:text-slate-200">
-                            Monthly P/L
-                        </div>
-                        <div className="overflow-y-auto max-h-48">
-                            {Object.keys(stats.monthlyStats).length === 0 ? (
-                                <div className="px-4 py-6 text-center text-slate-400 text-sm">No data yet</div>
-                            ) : (
-                                <table className="w-full text-sm">
-                                    <tbody className="divide-y divide-slate-50 dark:divide-slate-700">
-                                        {Object.entries(stats.monthlyStats)
-                                            .sort((a, b) => new Date(b[0]) - new Date(a[0]))
-                                            .map(([month, pnl]) => (
-                                                <tr key={month} className="hover:bg-slate-50 dark:hover:bg-slate-700/50">
-                                                    <td className="px-4 py-2 text-sm text-slate-600 dark:text-slate-300">{month}</td>
-                                                    <td className={`px-4 py-2 text-right font-mono text-sm font-medium ${pnl >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
-                                                        {formatCurrency(pnl)}
-                                                    </td>
-                                                </tr>
-                                            ))}
-                                    </tbody>
-                                </table>
-                            )}
-                        </div>
-                    </div>
-
-                    {/* By Ticker Table */}
-                    <div className="bg-white dark:bg-slate-800 rounded-lg shadow-sm border border-slate-200 dark:border-slate-700 overflow-hidden">
-                        <div className="p-3 border-b border-slate-100 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-800/50 font-semibold text-sm text-slate-700 dark:text-slate-200">
-                            Ticker P/L
-                        </div>
-                        <div className="overflow-y-auto max-h-48">
-                            {Object.keys(stats.tickerStats).length === 0 ? (
-                                <div className="px-4 py-6 text-center text-slate-400 text-sm">No data yet</div>
-                            ) : (
-                                <table className="w-full text-sm">
-                                    <tbody className="divide-y divide-slate-50 dark:divide-slate-700">
-                                        {Object.entries(stats.tickerStats)
-                                            .sort((a, b) => b[1] - a[1])
-                                            .map(([ticker, pnl]) => (
-                                                <tr key={ticker} className="hover:bg-slate-50 dark:hover:bg-slate-700/50">
-                                                    <td className="px-4 py-2 text-sm font-semibold text-slate-700 dark:text-slate-200">{ticker}</td>
-                                                    <td className={`px-4 py-2 text-right font-mono text-sm font-medium ${pnl >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
-                                                        {formatCurrency(pnl)}
-                                                    </td>
-                                                </tr>
-                                            ))}
-                                    </tbody>
-                                </table>
-                            )}
-                        </div>
-                    </div>
-
-                    {/* Tips Card */}
-                    <div className="bg-indigo-50 dark:bg-indigo-900/30 rounded-lg border border-indigo-100 dark:border-indigo-800 p-4">
-                        <h4 className="font-semibold text-sm text-indigo-900 dark:text-indigo-300 mb-3">Wheel Strategy Tips</h4>
-                        <ul className="text-sm space-y-2 text-indigo-700 dark:text-indigo-400 list-disc pl-4">
-                            <li>Sell CSPs on red days.</li>
-                            <li>Sell CCs on green days.</li>
-                            <li>Avoid earnings weeks if conservative.</li>
-                            <li>Don't wheel stocks you don't want to own!</li>
-                        </ul>
-                    </div>
-                </div>
+                {/* Summary Cards */}
+                <SummaryCards stats={stats} />
 
             </div>
 
