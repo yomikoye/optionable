@@ -37,7 +37,7 @@ Apply professional design principles to the Optionable trading dashboard, making
 - `src/index.css` - Design tokens added
 
 ## Status
-**Phase 5 In Progress** - Major feature additions
+**COMPLETED** - Merged to main, pushed to GitHub, Docker images published as v0.4.0
 
 ## Phase 5 Tasks
 ### Quick Wins (1-5)
@@ -62,4 +62,53 @@ Apply professional design principles to the Optionable trading dashboard, making
 - [x] 18. Dark scrollbar
 
 ## Next Action
-Ready for review and commit
+Completed - v0.4.0 released
+
+---
+
+# Development Workflow Template
+
+## Phase 1: Discovery
+- [ ] Understand the request/problem
+- [ ] Explore codebase to find relevant files
+- [ ] Document current state and what needs to change
+- [ ] Identify dependencies and potential impacts
+- [ ] Create feature branch: `feature/[name]` or `fix/[name]`
+- [ ] Start dev server for live preview
+
+## Phase 2: Planning
+- [ ] Break task into smaller steps
+- [ ] Prioritize by dependency order (what needs to happen first)
+- [ ] Identify risks or blockers
+- [ ] Get user approval on approach if needed
+
+## Phase 3: Implementation
+- [ ] Work through steps incrementally
+- [ ] Test each change before moving on
+- [ ] Get user feedback after each major milestone
+- [ ] Adjust based on feedback
+- [ ] Don't remove existing functionality without asking
+
+## Phase 4: Polish
+- [ ] Handle edge cases (empty states, errors, loading)
+- [ ] Add user feedback mechanisms if needed (toasts, messages)
+- [ ] Clean up code (remove debug logs, unused imports)
+- [ ] Verify nothing broke
+
+## Phase 5: Ship
+- [ ] Commit with clear, descriptive message
+- [ ] Build artifacts if needed (Docker, binaries)
+- [ ] Push to registry if needed (Docker Hub, npm)
+- [ ] Merge to main
+- [ ] Push to GitHub
+- [ ] Tag release if applicable
+
+---
+
+## Key Principles
+1. **Branch first** - Never work directly on main
+2. **Live preview** - Run dev server so user sees changes in real-time
+3. **Incremental feedback** - Check in with user after each major change
+4. **Don't assume** - Ask before removing or changing existing behavior
+5. **Test before commit** - Verify changes work before committing
+6. **Ship working code** - Build and test before releasing
