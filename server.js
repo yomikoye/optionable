@@ -202,7 +202,7 @@ app.get('/api/health', (req, res) => {
         apiResponse.success(res, {
             status: 'healthy',
             database: { connected: true, tradeCount: dbCheck.count },
-            version: process.env.npm_package_version || '1.0.0'
+            version: process.env.npm_package_version || '0.5.0'
         });
     } catch (error) {
         apiResponse.error(res, 'Service unhealthy', 503, { database: error.message });
