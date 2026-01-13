@@ -134,6 +134,7 @@ docker buildx build --platform linux/amd64,linux/arm64 \
    - `CLAUDE.md` → update "Current Version" and add changes to version section
 3. Commit changes
 4. Build & push Docker (version used as tag):
+   - **Ensure Docker Desktop is running first** (`open -a Docker` on macOS)
    ```bash
    docker buildx build --platform linux/amd64,linux/arm64 \
      -t yomikoye/optionable:X.Y.Z \
