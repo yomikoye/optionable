@@ -162,6 +162,36 @@ if (!livePricesSetting) {
 
 console.log('📈 Capital gains tables verified');
 
+// Migration: Fix existing positions cost basis to include premium collected
+// Cost basis should be strike - premium, not just strike
+const positionsToFix = db.prepare(`
+    SELECT p.id, p.costBasis, p.shares, p.salePrice, t.strike, t.entryPrice
+    FROM positions p
+    JOIN trades t ON p.acquiredFromTradeId = t.id
+    WHERE p.acquiredFromTradeId IS NOT NULL
+`).all();
+
+let fixedCount = 0;
+for (const pos of positionsToFix) {
+    const correctCostBasis = pos.strike - pos.entryPrice;
+    // Only fix if the cost basis is wrong (equals strike without premium adjustment)
+    if (Math.abs(pos.costBasis - pos.strike) < 0.01) {
+        let capitalGainLoss = null;
+        if (pos.salePrice !== null) {
+            capitalGainLoss = (pos.salePrice - correctCostBasis) * pos.shares;
+        }
+        db.prepare(`
+            UPDATE positions
+            SET costBasis = ?, capitalGainLoss = COALESCE(?, capitalGainLoss), updatedAt = CURRENT_TIMESTAMP
+            WHERE id = ?
+        `).run(correctCostBasis, capitalGainLoss, pos.id);
+        fixedCount++;
+    }
+}
+if (fixedCount > 0) {
+    console.log(`🔧 Fixed ${fixedCount} position(s) cost basis to include premium collected`);
+}
+
 // Seed example data if database is empty (for demo purposes)
 const tradeCount = db.prepare('SELECT COUNT(*) as count FROM trades').get();
 if (tradeCount.count === 0) {
@@ -543,12 +573,13 @@ app.put('/api/trades/:id', (req, res) => {
             const assignmentDate = closedDate || new Date().toISOString().split('T')[0];
 
             if (type === 'CSP') {
-                // CSP Assigned: Create new position (acquired shares at strike price)
+                // CSP Assigned: Create new position (cost basis = strike - premium collected)
+                const adjustedCostBasis = strike - entryPrice;
                 db.prepare(`
                     INSERT INTO positions (ticker, shares, costBasis, acquiredDate, acquiredFromTradeId)
                     VALUES (?, ?, ?, ?, ?)
-                `).run(tickerUpper, shares, strike, assignmentDate, req.params.id);
-                console.log(`📈 Position created: ${shares} shares of ${tickerUpper} at $${strike}`);
+                `).run(tickerUpper, shares, adjustedCostBasis, assignmentDate, req.params.id);
+                console.log(`📈 Position created: ${shares} shares of ${tickerUpper} at $${adjustedCostBasis.toFixed(2)} (strike $${strike} - premium $${entryPrice})`);
             } else if (type === 'CC') {
                 // CC Assigned: Close oldest open position (FIFO)
                 const openPosition = db.prepare(`
