@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { X, RefreshCw } from 'lucide-react';
 
 // Shared utilities
-import { API_URL, TRADES_PER_PAGE } from './utils/constants';
+import { API_URL, TRADES_PER_PAGE, APP_VERSION } from './utils/constants';
 import { formatCurrency } from './utils/formatters';
 import { calculateMetrics, calculateDaysHeld } from './utils/calculations';
 
@@ -644,8 +644,10 @@ export default function App() {
             ? completedTrades.reduce((acc, t) => acc + calculateMetrics(t).roi, 0) / completedTrades.length
             : 0;
 
-        // Capital deployed (collateral for open trades)
-        const capitalAtRisk = openTrades.reduce((acc, t) => acc + calculateMetrics(t).collateral, 0);
+        // Capital deployed (collateral for open CSPs only - CCs use owned shares, not cash)
+        const capitalAtRisk = openTrades
+            .filter(t => t.type === 'CSP')
+            .reduce((acc, t) => acc + calculateMetrics(t).collateral, 0);
 
         // Count rolled trades
         const rolledCount = filteredTrades.filter(t => t.status === 'Rolled').length;
@@ -802,6 +804,7 @@ export default function App() {
                     onNewTrade={() => openModal()}
                     onOpenPositions={() => setShowPositions(true)}
                     onOpenSettings={() => setShowSettings(true)}
+                    version={APP_VERSION}
                 />
 
                 {/* Dashboard Grid */}

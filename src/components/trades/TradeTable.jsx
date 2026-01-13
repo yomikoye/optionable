@@ -306,10 +306,14 @@ export const TradeTable = ({
                                             </td>
                                             <td className="px-3 py-2 text-right">
                                                 <div className="flex justify-end gap-1">
-                                                    {/* Open CC button - shown when CSP is assigned */}
-                                                    {chain.finalStatus === 'Assigned' && rootTrade.type === 'CSP' && onOpenCC && (
+                                                    {/* Open CC button - shown when CSP was assigned and shares still owned (no open CC, and last CC wasn't assigned) */}
+                                                    {rootTrade.type === 'CSP' &&
+                                                     rootTrade.status === 'Assigned' &&
+                                                     chain.finalStatus !== 'Open' &&
+                                                     !(chain.trades[chain.trades.length - 1].type === 'CC' && chain.trades[chain.trades.length - 1].status === 'Assigned') &&
+                                                     onOpenCC && (
                                                         <button
-                                                            onClick={() => onOpenCC(rootTrade)}
+                                                            onClick={() => onOpenCC(chain.trades[chain.trades.length - 1])}
                                                             className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-purple-600 dark:text-purple-400 hover:bg-purple-50 dark:hover:bg-purple-900/30 rounded transition-colors"
                                                             title="Sell a call on your assigned shares"
                                                         >

@@ -8,7 +8,8 @@ export const Header = ({
     onImport,
     onNewTrade,
     onOpenPositions,
-    onOpenSettings
+    onOpenSettings,
+    version
 }) => {
     return (
         <header className="flex flex-col md:flex-row justify-between items-start md:items-center bg-white dark:bg-slate-800 p-6 rounded-lg shadow-sm border border-slate-200 dark:border-slate-700">
@@ -16,6 +17,11 @@ export const Header = ({
                 <h1 className="text-2xl font-bold text-slate-900 dark:text-white flex items-center gap-2">
                     <Activity className="w-6 h-6 text-indigo-600 dark:text-indigo-400" />
                     Optionable
+                    {version && (
+                        <span className="text-xs font-normal text-slate-400 dark:text-slate-500 bg-slate-100 dark:bg-slate-700 px-2 py-0.5 rounded">
+                            v{version}
+                        </span>
+                    )}
                 </h1>
                 <p className="text-slate-500 dark:text-slate-400 text-sm mt-1">Documenting the Wheel Strategy</p>
             </div>

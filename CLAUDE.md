@@ -3,12 +3,12 @@
 ## Project Overview
 Wheel Strategy Tracker for Cash Secured Puts (CSPs) and Covered Calls (CCs).
 
-**Current Version:** 0.6.0
+**Current Version:** 0.7.0
 **Docker:** `yomikoye/optionable:latest`
 
 ---
 
-## Architecture (v0.6.0)
+## Architecture (v0.7.0)
 
 ```
 src/
@@ -122,16 +122,30 @@ docker buildx build --platform linux/amd64,linux/arm64 \
 ```
 
 ### Release Process
-1. Update version in `package.json`
-2. Update version fallback in `server.js`
-3. Update version badges in README.md
-4. Commit changes
-5. Build & push Docker
-6. Push to GitHub
+
+**IMPORTANT:** After completing any feature or bug fix, ask the user if they're ready to bump the version before committing. They may have additional work planned for the current feature.
+
+1. **Ask user:** "Ready to bump version and release?" (they may not be done yet)
+2. **Bump version** (after user confirms, before commit):
+   - `package.json` → update `"version"`
+   - `server.js` → update fallback version in `/api/health`
+   - `src/utils/constants.js` → update `APP_VERSION`
+   - `README.md` → update version badge and docker example
+   - `CLAUDE.md` → update "Current Version" and add changes to version section
+3. Commit changes
+4. Build & push Docker (version used as tag):
+   ```bash
+   docker buildx build --platform linux/amd64,linux/arm64 \
+     -t yomikoye/optionable:X.Y.Z \
+     -t yomikoye/optionable:latest \
+     --push .
+   ```
+5. Push to GitHub
+6. (Optional) Create git tag: `git tag vX.Y.Z && git push --tags`
 
 ---
 
-## Features (v0.6.0)
+## Features (v0.7.0)
 
 ### Dashboard KPIs (synced with chart time filter)
 1. **Premium Collected** - Net premium from closed trades
@@ -139,7 +153,7 @@ docker buildx build --platform linux/amd64,linux/arm64 \
 3. **Win Rate** - Percentage of profitable chains
 4. **Stock Gains** - Realized capital gains from positions
 5. **Total P/L** - Premiums + Stock Gains combined
-6. **Deployed Capital** - Collateral locked in open trades
+6. **Deployed Capital** - Cash collateral locked in open CSPs (excludes CCs)
 
 ### Trade Chains
 - Rolled trades linked via `parentTradeId`
@@ -183,6 +197,16 @@ docker buildx build --platform linux/amd64,linux/arm64 \
 - [x] Keyboard shortcuts (N, P, S, H, D, Esc)
 - [x] Fix delete with FK constraints
 - [x] Pagination (5 chains per page)
+
+---
+
+## v0.7.0 Changes
+
+- [x] **Cost basis fix** - CSP assignment now calculates cost basis as `strike - premium`
+- [x] **Migration** - Auto-fix existing positions with incorrect cost basis
+- [x] **Deployed capital fix** - Only counts CSPs (CCs use owned shares, not cash)
+- [x] **Sell CC button fix** - Now shows after CC expires to sell another CC
+- [x] **Version display** - App version shown in header
 
 ---
 

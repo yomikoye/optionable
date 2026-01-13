@@ -1,6 +1,9 @@
 // API Configuration
 export const API_URL = '/api';
 
+// App Version
+export const APP_VERSION = '0.7.0';
+
 // Pagination
 export const TRADES_PER_PAGE = 5;
 
