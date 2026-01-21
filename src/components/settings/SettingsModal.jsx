@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Settings, X, Wifi, WifiOff } from 'lucide-react';
+import { Settings, X, Wifi, WifiOff, ShieldCheck, ShieldOff } from 'lucide-react';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
 
@@ -49,6 +49,7 @@ export const SettingsModal = ({ onClose, showToast }) => {
     };
 
     const livePricesEnabled = settings.live_prices_enabled === 'true';
+    const confirmExpireEnabled = settings.confirm_expire_enabled !== 'false'; // Default true
 
     if (loading) {
         return (
@@ -106,6 +107,38 @@ export const SettingsModal = ({ onClose, showToast }) => {
                             <span
                                 className={`absolute top-1 left-1 w-4 h-4 bg-white rounded-full shadow transition-transform ${
                                     livePricesEnabled ? 'translate-x-5' : 'translate-x-0'
+                                }`}
+                            />
+                        </button>
+                    </div>
+
+                    {/* Confirm Expire Toggle */}
+                    <div className="flex items-center justify-between p-4 bg-slate-50 dark:bg-slate-700/50 rounded-lg">
+                        <div className="flex items-center gap-3">
+                            {confirmExpireEnabled ? (
+                                <ShieldCheck className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
+                            ) : (
+                                <ShieldOff className="w-5 h-5 text-slate-400" />
+                            )}
+                            <div>
+                                <p className="font-medium text-slate-900 dark:text-white">Confirm Expiry</p>
+                                <p className="text-sm text-slate-500 dark:text-slate-400">
+                                    Ask for confirmation before expiring trades
+                                </p>
+                            </div>
+                        </div>
+                        <button
+                            onClick={() => updateSetting('confirm_expire_enabled', confirmExpireEnabled ? 'false' : 'true')}
+                            disabled={saving}
+                            className={`relative shrink-0 w-11 h-6 rounded-full transition-colors ${
+                                confirmExpireEnabled
+                                    ? 'bg-indigo-500'
+                                    : 'bg-slate-300 dark:bg-slate-600'
+                            }`}
+                        >
+                            <span
+                                className={`absolute top-1 left-1 w-4 h-4 bg-white rounded-full shadow transition-transform ${
+                                    confirmExpireEnabled ? 'translate-x-5' : 'translate-x-0'
                                 }`}
                             />
                         </button>

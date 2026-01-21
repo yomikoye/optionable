@@ -38,9 +38,26 @@ export const TradeTable = ({
     onRoll,
     onEdit,
     onDelete,
-    onOpenCC
+    onOpenCC,
+    confirmExpireEnabled = true
 }) => {
     const [expandedChains, setExpandedChains] = useState(new Set());
+    const [expireConfirm, setExpireConfirm] = useState(null); // trade to confirm expire
+
+    const handleExpireClick = (trade) => {
+        if (confirmExpireEnabled) {
+            setExpireConfirm(trade);
+        } else {
+            onQuickClose(trade);
+        }
+    };
+
+    const confirmExpire = () => {
+        if (expireConfirm) {
+            onQuickClose(expireConfirm);
+            setExpireConfirm(null);
+        }
+    };
 
     // Build chains from trades - group related trades together
     const chainedTrades = useMemo(() => {
@@ -233,21 +250,24 @@ export const TradeTable = ({
                                         <tr className={`hover:bg-slate-50/80 dark:hover:bg-slate-700/50 transition-colors ${chain.isMultiTrade ? 'bg-slate-25 dark:bg-slate-800/80' : ''}`}>
                                             <td className="px-3 py-2 text-sm text-slate-700 dark:text-slate-200">
                                                 <div className="flex items-center gap-1">
-                                                    {chain.isMultiTrade && (
-                                                        <button
-                                                            onClick={() => toggleChain(chain.id)}
-                                                            className="p-0.5 hover:bg-slate-200 dark:hover:bg-slate-600 rounded mr-1"
-                                                        >
-                                                            {isExpanded ? (
+                                                    <button
+                                                        onClick={() => chain.isMultiTrade && toggleChain(chain.id)}
+                                                        className={`p-0.5 rounded ${chain.isMultiTrade ? 'hover:bg-slate-200 dark:hover:bg-slate-600 cursor-pointer' : 'cursor-default'}`}
+                                                        disabled={!chain.isMultiTrade}
+                                                    >
+                                                        {chain.isMultiTrade ? (
+                                                            isExpanded ? (
                                                                 <ChevronDown className="w-4 h-4 text-slate-500" />
                                                             ) : (
                                                                 <ChevronRight className="w-4 h-4 text-slate-500" />
-                                                            )}
-                                                        </button>
-                                                    )}
-                                                    {rootTrade.ticker.toUpperCase()}
+                                                            )
+                                                        ) : (
+                                                            <ChevronRight className="w-4 h-4 text-transparent" />
+                                                        )}
+                                                    </button>
+                                                    <span className="font-medium">{rootTrade.ticker.toUpperCase()}</span>
                                                     {chain.isMultiTrade && (
-                                                        <span className="ml-1 px-1.5 py-0.5 text-[10px] font-medium bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-400 rounded">
+                                                        <span className="px-1.5 py-0.5 text-[10px] font-medium bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-400 rounded">
                                                             {chain.trades.length}
                                                         </span>
                                                     )}
@@ -324,7 +344,7 @@ export const TradeTable = ({
                                                     {chain.finalStatus === 'Open' && (
                                                         <>
                                                             <button
-                                                                onClick={() => onQuickClose(chain.trades[chain.trades.length - 1])}
+                                                                onClick={() => handleExpireClick(chain.trades[chain.trades.length - 1])}
                                                                 className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-slate-500 dark:text-slate-400 hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-900/30 rounded transition-colors"
                                                                 title="Mark as expired worthless"
                                                             >
@@ -483,6 +503,34 @@ export const TradeTable = ({
                         >
                             <ChevronRight className="w-4 h-4" />
                         </button>
+                    </div>
+                </div>
+            )}
+
+            {/* Expire Confirmation Modal */}
+            {expireConfirm && (
+                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+                    <div className="bg-white dark:bg-slate-800 rounded-lg shadow-xl max-w-sm w-full mx-4 p-6">
+                        <h3 className="text-lg font-semibold text-slate-900 dark:text-white mb-2">
+                            Confirm Expiry
+                        </h3>
+                        <p className="text-sm text-slate-600 dark:text-slate-400 mb-4">
+                            Mark <span className="font-semibold">{expireConfirm.ticker} {expireConfirm.type} ${expireConfirm.strike}</span> as expired worthless?
+                        </p>
+                        <div className="flex gap-3">
+                            <button
+                                onClick={() => setExpireConfirm(null)}
+                                className="flex-1 px-4 py-2 border border-slate-300 dark:border-slate-600 rounded-lg text-slate-700 dark:text-slate-300 font-medium hover:bg-slate-50 dark:hover:bg-slate-700"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                onClick={confirmExpire}
+                                className="flex-1 px-4 py-2 bg-emerald-600 dark:bg-emerald-500 rounded-lg text-white font-semibold hover:bg-emerald-700 dark:hover:bg-emerald-600"
+                            >
+                                Expire
+                            </button>
+                        </div>
                     </div>
                 </div>
             )}

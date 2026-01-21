@@ -2,7 +2,7 @@
 
 A self-hosted wheel strategy tracker for Cash Secured Puts (CSPs) and Covered Calls (CCs).
 
-![Version](https://img.shields.io/badge/version-0.7.0-blue)
+![Version](https://img.shields.io/badge/version-0.8.0-blue)
 ![Docker](https://img.shields.io/badge/docker-yomikoye%2Foptionable-green)
 ![Platforms](https://img.shields.io/badge/platforms-amd64%20%7C%20arm64-lightgrey)
 
@@ -22,6 +22,8 @@ A self-hosted wheel strategy tracker for Cash Secured Puts (CSPs) and Covered Ca
 - **Dark Mode** - Light mode default, toggle to dark
 - **Keyboard Shortcuts** - N (new), P (positions), S (settings), H (help), D (dark mode), Esc (close)
 - **Welcome Guide** - First-time user onboarding with feature overview
+- **Trade Notes** - Add optional notes to each trade
+- **Expiry Confirmation** - Optional confirmation dialog before expiring trades (configurable in settings)
 - **Self-hosted** - SQLite database, full data ownership
 
 ## Quick Start
@@ -123,7 +125,7 @@ src/
 ```bash
 # Multi-platform build and push
 docker buildx build --platform linux/amd64,linux/arm64 \
-  -t yomikoye/optionable:0.7.0 \
+  -t yomikoye/optionable:0.8.0 \
   -t yomikoye/optionable:latest \
   --push .
 ```

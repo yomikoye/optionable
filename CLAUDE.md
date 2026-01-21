@@ -3,12 +3,12 @@
 ## Project Overview
 Wheel Strategy Tracker for Cash Secured Puts (CSPs) and Covered Calls (CCs).
 
-**Current Version:** 0.7.0
+**Current Version:** 0.8.0
 **Docker:** `yomikoye/optionable:latest`
 
 ---
 
-## Architecture (v0.7.0)
+## Architecture (v0.8.0)
 
 ```
 src/
@@ -24,7 +24,7 @@ src/
 │   ├── chart/PnLChart.jsx      # Cumulative P/L chart
 │   ├── trades/TradeTable.jsx   # Trade log with chain grouping
 │   ├── positions/PositionsTable.jsx  # Stock positions tracking
-│   └── settings/SettingsModal.jsx    # App settings (live prices toggle)
+│   └── settings/SettingsModal.jsx    # App settings (live prices, confirm expiry)
 ├── hooks/
 │   ├── useToast.js             # Toast notification hook
 │   ├── useTheme.js             # Dark mode toggle
@@ -60,6 +60,7 @@ CREATE TABLE trades (
   closedDate TEXT,
   status TEXT DEFAULT 'Open',      -- Open, Expired, Assigned, Closed, Rolled
   parentTradeId INTEGER,           -- Links rolled/chained trades
+  notes TEXT,                      -- Optional trade notes
   createdAt TEXT DEFAULT CURRENT_TIMESTAMP,
   updatedAt TEXT DEFAULT CURRENT_TIMESTAMP
 );
@@ -146,7 +147,7 @@ docker buildx build --platform linux/amd64,linux/arm64 \
 
 ---
 
-## Features (v0.7.0)
+## Features (v0.8.0)
 
 ### Dashboard KPIs (synced with chart time filter)
 1. **Premium Collected** - Net premium from closed trades
@@ -211,6 +212,17 @@ docker buildx build --platform linux/amd64,linux/arm64 \
 
 ---
 
+## v0.8.0 Changes
+
+- [x] **Stock gains cleanup** - Deleting trades now properly deletes associated positions and capital gains
+- [x] **Orphaned positions cleanup** - Startup migration removes positions with no linked trades
+- [x] **Trade notes** - Added optional notes field to trades (stored in database, editable in modal)
+- [x] **Expiry confirmation** - Confirmation dialog before marking trades as expired
+- [x] **Confirm expiry setting** - Toggle in Settings to enable/disable expiry confirmation
+- [x] **Ticker alignment fix** - Trade table rows now align consistently (invisible chevron placeholder for single trades)
+
+---
+
 ## Future Ideas
 
 - **Brokerage Import** - Import trades from TD Ameritrade, Schwab CSV
@@ -230,7 +242,7 @@ docker buildx build --platform linux/amd64,linux/arm64 \
 | `src/App.jsx` | Main React app, state management, TradeModal |
 | `src/components/trades/TradeTable.jsx` | Trade log with chain grouping |
 | `src/components/positions/PositionsTable.jsx` | Stock positions tracking |
-| `src/components/settings/SettingsModal.jsx` | Settings with live prices toggle |
+| `src/components/settings/SettingsModal.jsx` | Settings (live prices, confirm expiry) |
 | `src/components/ui/WelcomeModal.jsx` | First-time user onboarding |
 | `src/utils/calculations.js` | P/L calculations, metrics |
 | `Dockerfile` | Multi-stage build for production |

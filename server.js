@@ -78,6 +78,7 @@ if (tableInfo && tableInfo.sql && !tableInfo.sql.includes("'Rolled'")) {
         closedDate TEXT,
         status TEXT NOT NULL DEFAULT 'Open' CHECK(status IN ('Open', 'Expired', 'Assigned', 'Closed', 'Rolled')),
         parentTradeId INTEGER REFERENCES trades(id),
+        notes TEXT,
         createdAt TEXT DEFAULT CURRENT_TIMESTAMP,
         updatedAt TEXT DEFAULT CURRENT_TIMESTAMP
       )
@@ -94,6 +95,13 @@ try {
 // Add parentTradeId column if it doesn't exist (for existing databases)
 try {
     db.exec(`ALTER TABLE trades ADD COLUMN parentTradeId INTEGER REFERENCES trades(id)`);
+} catch (e) {
+    // Column already exists, ignore
+}
+
+// Add notes column if it doesn't exist (for existing databases)
+try {
+    db.exec(`ALTER TABLE trades ADD COLUMN notes TEXT`);
 } catch (e) {
     // Column already exists, ignore
 }
@@ -190,6 +198,15 @@ for (const pos of positionsToFix) {
 }
 if (fixedCount > 0) {
     console.log(`🔧 Fixed ${fixedCount} position(s) cost basis to include premium collected`);
+}
+
+// Clean up orphaned positions (positions whose originating trade was deleted)
+const orphanedPositions = db.prepare(`
+    DELETE FROM positions
+    WHERE acquiredFromTradeId IS NULL
+`).run();
+if (orphanedPositions.changes > 0) {
+    console.log(`🧹 Cleaned up ${orphanedPositions.changes} orphaned position(s)`);
 }
 
 // Seed example data if database is empty (for demo purposes)
@@ -305,7 +322,7 @@ app.get('/api/health', (req, res) => {
         apiResponse.success(res, {
             status: 'healthy',
             database: { connected: true, tradeCount: dbCheck.count },
-            version: process.env.npm_package_version || '0.7.0'
+            version: process.env.npm_package_version || '0.8.0'
         });
     } catch (error) {
         apiResponse.error(res, 'Service unhealthy', 503, { database: error.message });
@@ -416,7 +433,8 @@ app.post('/api/trades', (req, res) => {
             expirationDate,
             closedDate,
             status,
-            parentTradeId
+            parentTradeId,
+            notes
         } = req.body;
 
         const tickerUpper = ticker.toUpperCase();
@@ -439,8 +457,8 @@ app.post('/api/trades', (req, res) => {
         }
 
         const stmt = db.prepare(`
-      INSERT INTO trades (ticker, type, strike, quantity, delta, entryPrice, closePrice, openedDate, expirationDate, closedDate, status, parentTradeId)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO trades (ticker, type, strike, quantity, delta, entryPrice, closePrice, openedDate, expirationDate, closedDate, status, parentTradeId, notes)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
         const result = stmt.run(
@@ -455,7 +473,8 @@ app.post('/api/trades', (req, res) => {
             expirationDate,
             closedDate || null,
             status || 'Open',
-            resolvedParentTradeId
+            resolvedParentTradeId,
+            notes || null
         );
 
         const newTrade = db.prepare('SELECT * FROM trades WHERE id = ?').get(result.lastInsertRowid);
@@ -536,11 +555,12 @@ app.put('/api/trades/:id', (req, res) => {
         const closedDate = req.body.closedDate ?? currentTrade.closedDate;
         const status = req.body.status ?? currentTrade.status;
         const parentTradeId = req.body.parentTradeId ?? currentTrade.parentTradeId;
+        const notes = req.body.notes ?? currentTrade.notes;
 
         const stmt = db.prepare(`
       UPDATE trades
       SET ticker = ?, type = ?, strike = ?, quantity = ?, delta = ?, entryPrice = ?, closePrice = ?,
-          openedDate = ?, expirationDate = ?, closedDate = ?, status = ?, parentTradeId = ?, updatedAt = CURRENT_TIMESTAMP
+          openedDate = ?, expirationDate = ?, closedDate = ?, status = ?, parentTradeId = ?, notes = ?, updatedAt = CURRENT_TIMESTAMP
       WHERE id = ?
     `);
 
@@ -557,6 +577,7 @@ app.put('/api/trades/:id', (req, res) => {
             closedDate || null,
             status || 'Open',
             parentTradeId || null,
+            notes || null,
             req.params.id
         );
 
@@ -616,9 +637,21 @@ app.delete('/api/trades/:id', (req, res) => {
         // Unlink child trades (set parentTradeId to NULL)
         db.prepare('UPDATE trades SET parentTradeId = NULL WHERE parentTradeId = ?').run(tradeId);
 
-        // Unlink positions that reference this trade
-        db.prepare('UPDATE positions SET acquiredFromTradeId = NULL WHERE acquiredFromTradeId = ?').run(tradeId);
-        db.prepare('UPDATE positions SET soldViaTradeId = NULL WHERE soldViaTradeId = ?').run(tradeId);
+        // Delete positions that were created by this trade (CSP assignment)
+        const deletedPositions = db.prepare('DELETE FROM positions WHERE acquiredFromTradeId = ?').run(tradeId);
+        if (deletedPositions.changes > 0) {
+            console.log(`🗑️ Deleted ${deletedPositions.changes} position(s) created by trade ${tradeId}`);
+        }
+
+        // Reset positions that were sold via this trade (CC assignment) - make them open again
+        const resetPositions = db.prepare(`
+            UPDATE positions
+            SET soldDate = NULL, salePrice = NULL, soldViaTradeId = NULL, capitalGainLoss = NULL, updatedAt = CURRENT_TIMESTAMP
+            WHERE soldViaTradeId = ?
+        `).run(tradeId);
+        if (resetPositions.changes > 0) {
+            console.log(`↩️ Reset ${resetPositions.changes} position(s) sold via trade ${tradeId}`);
+        }
 
         // Delete the trade
         const result = db.prepare('DELETE FROM trades WHERE id = ?').run(tradeId);

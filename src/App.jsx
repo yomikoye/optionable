@@ -45,6 +45,7 @@ export default function App() {
         closePrice: '',
         status: 'Open',
         parentTradeId: null,
+        notes: '',
     };
     const [formData, setFormData] = useState(initialFormState);
     const [isRolling, setIsRolling] = useState(false);
@@ -61,6 +62,11 @@ export default function App() {
         realizedCapitalGL: 0,
         openPositions: 0,
         closedPositions: 0
+    });
+
+    // App settings
+    const [appSettings, setAppSettings] = useState({
+        confirm_expire_enabled: 'true' // Default to true
     });
 
     // Toast state
@@ -173,9 +179,23 @@ export default function App() {
         }
     };
 
+    const fetchSettings = async () => {
+        try {
+            const response = await fetch(`${API_URL}/settings`);
+            if (!response.ok) return;
+            const json = await response.json();
+            if (json.success && json.data) {
+                setAppSettings(json.data);
+            }
+        } catch (err) {
+            console.error('Error fetching settings:', err);
+        }
+    };
+
     useEffect(() => {
         fetchTrades();
         fetchCapitalGainsStats();
+        fetchSettings();
     }, []);
 
     // --- Filtering & Sorting ---
@@ -259,6 +279,7 @@ export default function App() {
                 closePrice: trade.closePrice || '',
                 status: trade.status,
                 parentTradeId: trade.parentTradeId || null,
+                notes: trade.notes || '',
             });
         } else {
             setEditingId(null);
@@ -288,6 +309,7 @@ export default function App() {
             closePrice: '',
             status: 'Open',
             parentTradeId: null,
+            notes: '',
         });
         setIsModalOpen(true);
     };
@@ -311,6 +333,7 @@ export default function App() {
             closePrice: '',
             status: 'Open',
             parentTradeId: trade.id,
+            notes: '',
         });
         setIsModalOpen(true);
     };
@@ -333,6 +356,7 @@ export default function App() {
             closePrice: '',
             status: 'Open',
             parentTradeId: cspTrade.id,
+            notes: '',
         });
         setIsModalOpen(true);
     };
@@ -382,6 +406,7 @@ export default function App() {
             closedDate: formData.closedDate || null,
             status: formData.status,
             parentTradeId: formData.parentTradeId || null,
+            notes: formData.notes || null,
         };
 
         try {
@@ -834,6 +859,7 @@ export default function App() {
                     onEdit={openModal}
                     onDelete={deleteTrade}
                     onOpenCC={openCoveredCall}
+                    confirmExpireEnabled={appSettings.confirm_expire_enabled !== 'false'}
                 />
 
                 {/* Summary Cards */}
@@ -1019,6 +1045,18 @@ export default function App() {
                                 )}
                             </div>
 
+                            <div>
+                                <label className="block text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase mb-1">Notes</label>
+                                <textarea
+                                    name="notes"
+                                    value={formData.notes}
+                                    onChange={handleInputChange}
+                                    rows={2}
+                                    className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg text-sm bg-white dark:bg-slate-700 text-slate-900 dark:text-white resize-none"
+                                    placeholder="Optional notes about this trade..."
+                                />
+                            </div>
+
                             {!isRolling && (
                                 <div>
                                     <label className="block text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase mb-1">Status</label>
@@ -1064,7 +1102,7 @@ export default function App() {
             {/* Settings Modal */}
             {showSettings && (
                 <SettingsModal
-                    onClose={() => setShowSettings(false)}
+                    onClose={() => { setShowSettings(false); fetchSettings(); }}
                     showToast={showToast}
                 />
             )}
