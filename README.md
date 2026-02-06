@@ -6,6 +6,12 @@ A self-hosted wheel strategy tracker for Cash Secured Puts (CSPs) and Covered Ca
 ![Docker](https://img.shields.io/badge/docker-yomikoye%2Foptionable-green)
 ![Platforms](https://img.shields.io/badge/platforms-amd64%20%7C%20arm64-lightgrey)
 
+## Philosophy
+
+Optionable is designed to be **fast, fully local, and self-contained**. Everything runs on your own hardware with no accounts to create, no cloud sync, and no brokerage connections required. Your trade data lives in a local SQLite database that you own completely.
+
+The only external dependency is optional live stock prices via [stockprices.dev](https://stockprices.dev), used for unrealized P/L on open positions. This can be disabled in settings, making the app fully offline-capable.
+
 ## Features
 
 - **Dashboard** - Premium collected, ROI, win rate, stock gains, total P/L, deployed capital
@@ -14,7 +20,7 @@ A self-hosted wheel strategy tracker for Cash Secured Puts (CSPs) and Covered Ca
 - **Trade Log** - Full trade history with chain grouping, sorting, filtering, pagination
 - **Trade Chains** - Rolled trades and CSP→CC sequences grouped together
 - **Positions Table** - Track open and closed stock positions with realized/unrealized gains
-- **Live Stock Prices** - Optional real-time prices for unrealized G/L (via stockprices.dev)
+- **Live Stock Prices** - Optional real-time prices for unrealized G/L (via [stockprices.dev](https://stockprices.dev), can be disabled)
 - **Roll Tracking** - Link rolled trades to track full position chains
 - **Analytics** - Monthly and per-ticker P/L breakdowns
 - **Auto Calculations** - P/L, ROI, annualized ROI, DTE, collateral
@@ -24,7 +30,6 @@ A self-hosted wheel strategy tracker for Cash Secured Puts (CSPs) and Covered Ca
 - **Welcome Guide** - First-time user onboarding with feature overview
 - **Trade Notes** - Add optional notes to each trade
 - **Expiry Confirmation** - Optional confirmation dialog before expiring trades (configurable in settings)
-- **Self-hosted** - SQLite database, full data ownership
 
 ## Quick Start
 
@@ -46,21 +51,6 @@ docker run -d -p 8080:8080 -v optionable-data:/data yomikoye/optionable:latest
 
 # Or with docker-compose
 docker compose up -d
-```
-
-### Homelab Deployment
-
-The `docker-compose.yml` is configured for Traefik reverse proxy:
-
-```yaml
-services:
-  optionable:
-    image: yomikoye/optionable:latest
-    volumes:
-      - /path/to/data:/data
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.optionable.rule=Host(`optionable.yourdomain.com`)"
 ```
 
 ## API
