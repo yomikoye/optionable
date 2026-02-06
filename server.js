@@ -21,154 +21,356 @@ if (!existsSync(DATA_DIR)) {
 const dbPath = join(DATA_DIR, 'optionable.db');
 const db = new Database(dbPath);
 
-// Check if trades table exists and needs migration for 'Rolled' status
-const tableInfo = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='trades'").get();
+// Enable WAL mode for better concurrent read/write performance
+db.pragma('journal_mode = WAL');
 
-if (tableInfo && tableInfo.sql && !tableInfo.sql.includes("'Rolled'")) {
-    // Migrate existing table to support 'Rolled' status and parentTradeId
-    console.log('Migrating trades table to support Rolled status...');
+// Foreign keys disabled during migrations, enabled after
+db.pragma('foreign_keys = OFF');
 
-    db.exec(`
-        -- Create new table with updated schema
-        CREATE TABLE trades_new (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            ticker TEXT NOT NULL,
-            type TEXT NOT NULL CHECK(type IN ('CSP', 'CC')),
-            strike REAL NOT NULL,
-            quantity INTEGER NOT NULL DEFAULT 1,
-            delta REAL,
-            entryPrice REAL NOT NULL,
-            closePrice REAL DEFAULT 0,
-            openedDate TEXT NOT NULL,
-            expirationDate TEXT NOT NULL,
-            closedDate TEXT,
-            status TEXT NOT NULL DEFAULT 'Open' CHECK(status IN ('Open', 'Expired', 'Assigned', 'Closed', 'Rolled')),
-            parentTradeId INTEGER REFERENCES trades(id),
-            createdAt TEXT DEFAULT CURRENT_TIMESTAMP,
-            updatedAt TEXT DEFAULT CURRENT_TIMESTAMP
-        );
-        
-        -- Copy existing data
-        INSERT INTO trades_new (id, ticker, type, strike, quantity, delta, entryPrice, closePrice, openedDate, expirationDate, closedDate, status, createdAt, updatedAt)
-        SELECT id, ticker, type, strike, quantity, delta, entryPrice, closePrice, openedDate, expirationDate, closedDate, status, createdAt, updatedAt
-        FROM trades;
-        
-        -- Drop old table
-        DROP TABLE trades;
-        
-        -- Rename new table
-        ALTER TABLE trades_new RENAME TO trades;
-    `);
+// ============== Schema Versioning System ==============
+// Each migration runs once, tracked by version number
 
-    console.log('Migration complete!');
-} else if (!tableInfo) {
-    // Create fresh table if it doesn't exist
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS trades (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        ticker TEXT NOT NULL,
-        type TEXT NOT NULL CHECK(type IN ('CSP', 'CC')),
-        strike REAL NOT NULL,
-        quantity INTEGER NOT NULL DEFAULT 1,
-        delta REAL,
-        entryPrice REAL NOT NULL,
-        closePrice REAL DEFAULT 0,
-        openedDate TEXT NOT NULL,
-        expirationDate TEXT NOT NULL,
-        closedDate TEXT,
-        status TEXT NOT NULL DEFAULT 'Open' CHECK(status IN ('Open', 'Expired', 'Assigned', 'Closed', 'Rolled')),
-        parentTradeId INTEGER REFERENCES trades(id),
-        notes TEXT,
-        createdAt TEXT DEFAULT CURRENT_TIMESTAMP,
-        updatedAt TEXT DEFAULT CURRENT_TIMESTAMP
-      )
-    `);
-}
-
-// Add delta column if it doesn't exist (for existing databases)
-try {
-    db.exec(`ALTER TABLE trades ADD COLUMN delta REAL`);
-} catch (e) {
-    // Column already exists, ignore
-}
-
-// Add parentTradeId column if it doesn't exist (for existing databases)
-try {
-    db.exec(`ALTER TABLE trades ADD COLUMN parentTradeId INTEGER REFERENCES trades(id)`);
-} catch (e) {
-    // Column already exists, ignore
-}
-
-// Add notes column if it doesn't exist (for existing databases)
-try {
-    db.exec(`ALTER TABLE trades ADD COLUMN notes TEXT`);
-} catch (e) {
-    // Column already exists, ignore
-}
-
-// Create indexes for performance (idempotent)
 db.exec(`
-    CREATE INDEX IF NOT EXISTS idx_trades_status ON trades(status);
-    CREATE INDEX IF NOT EXISTS idx_trades_ticker ON trades(ticker);
-    CREATE INDEX IF NOT EXISTS idx_trades_openedDate ON trades(openedDate);
-    CREATE INDEX IF NOT EXISTS idx_trades_expirationDate ON trades(expirationDate);
-    CREATE INDEX IF NOT EXISTS idx_trades_closedDate ON trades(closedDate);
-    CREATE INDEX IF NOT EXISTS idx_trades_parentTradeId ON trades(parentTradeId);
-    CREATE INDEX IF NOT EXISTS idx_trades_status_openedDate ON trades(status, openedDate);
-`);
-console.log('📊 Database indexes verified');
-
-// ============== v0.6.0: Capital Gains Tables ==============
-
-// Positions table - track share positions from assignments
-db.exec(`
-    CREATE TABLE IF NOT EXISTS positions (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        ticker TEXT NOT NULL,
-        shares INTEGER NOT NULL,
-        costBasis REAL NOT NULL,
-        acquiredDate TEXT NOT NULL,
-        acquiredFromTradeId INTEGER REFERENCES trades(id),
-        soldDate TEXT,
-        salePrice REAL,
-        soldViaTradeId INTEGER REFERENCES trades(id),
-        capitalGainLoss REAL,
-        createdAt TEXT DEFAULT CURRENT_TIMESTAMP,
-        updatedAt TEXT DEFAULT CURRENT_TIMESTAMP
-    );
-    CREATE INDEX IF NOT EXISTS idx_positions_ticker ON positions(ticker);
-    CREATE INDEX IF NOT EXISTS idx_positions_soldDate ON positions(soldDate);
-    CREATE INDEX IF NOT EXISTS idx_positions_acquiredFromTradeId ON positions(acquiredFromTradeId);
-`);
-
-// Price cache table - cache stock prices from external API
-db.exec(`
-    CREATE TABLE IF NOT EXISTS price_cache (
-        ticker TEXT PRIMARY KEY,
-        price REAL NOT NULL,
-        change REAL,
-        changePercent REAL,
-        name TEXT,
-        updatedAt TEXT DEFAULT CURRENT_TIMESTAMP
+    CREATE TABLE IF NOT EXISTS schema_migrations (
+        version INTEGER PRIMARY KEY,
+        applied_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        description TEXT
     )
 `);
 
-// Settings table - app configuration
-db.exec(`
-    CREATE TABLE IF NOT EXISTS settings (
-        key TEXT PRIMARY KEY,
-        value TEXT NOT NULL,
-        updatedAt TEXT DEFAULT CURRENT_TIMESTAMP
-    )
-`);
+const getSchemaVersion = () => {
+    const result = db.prepare('SELECT MAX(version) as version FROM schema_migrations').get();
+    return result?.version || 0;
+};
 
-// Initialize default settings
-const livePricesSetting = db.prepare('SELECT * FROM settings WHERE key = ?').get('live_prices_enabled');
-if (!livePricesSetting) {
-    db.prepare('INSERT INTO settings (key, value) VALUES (?, ?)').run('live_prices_enabled', 'true');
-}
+const setSchemaVersion = (version, description) => {
+    db.prepare('INSERT INTO schema_migrations (version, description) VALUES (?, ?)').run(version, description);
+};
 
-console.log('📈 Capital gains tables verified');
+// Define migrations in order
+const migrations = [
+    {
+        version: 1,
+        description: 'Initial trades table',
+        up: () => {
+            db.exec(`
+                CREATE TABLE IF NOT EXISTS trades (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    ticker TEXT NOT NULL CHECK(length(ticker) > 0),
+                    type TEXT NOT NULL CHECK(type IN ('CSP', 'CC')),
+                    strike INTEGER NOT NULL CHECK(strike > 0),
+                    quantity INTEGER NOT NULL DEFAULT 1 CHECK(quantity >= 1),
+                    delta REAL CHECK(delta IS NULL OR (delta >= 0 AND delta <= 1)),
+                    entryPrice INTEGER NOT NULL CHECK(entryPrice >= 0),
+                    closePrice INTEGER DEFAULT 0 CHECK(closePrice >= 0),
+                    openedDate TEXT NOT NULL,
+                    expirationDate TEXT NOT NULL,
+                    closedDate TEXT,
+                    status TEXT NOT NULL DEFAULT 'Open' CHECK(status IN ('Open', 'Expired', 'Assigned', 'Closed', 'Rolled')),
+                    parentTradeId INTEGER REFERENCES trades(id) ON DELETE SET NULL,
+                    notes TEXT,
+                    createdAt TEXT DEFAULT CURRENT_TIMESTAMP,
+                    updatedAt TEXT DEFAULT CURRENT_TIMESTAMP,
+                    CHECK(expirationDate >= openedDate)
+                )
+            `);
+        }
+    },
+    {
+        version: 2,
+        description: 'Positions table',
+        up: () => {
+            db.exec(`
+                CREATE TABLE IF NOT EXISTS positions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    ticker TEXT NOT NULL CHECK(length(ticker) > 0),
+                    shares INTEGER NOT NULL CHECK(shares >= 1),
+                    costBasis INTEGER NOT NULL CHECK(costBasis >= 0),
+                    acquiredDate TEXT NOT NULL,
+                    acquiredFromTradeId INTEGER REFERENCES trades(id) ON DELETE CASCADE,
+                    soldDate TEXT,
+                    salePrice INTEGER CHECK(salePrice IS NULL OR salePrice >= 0),
+                    soldViaTradeId INTEGER REFERENCES trades(id) ON DELETE SET NULL,
+                    capitalGainLoss INTEGER,
+                    createdAt TEXT DEFAULT CURRENT_TIMESTAMP,
+                    updatedAt TEXT DEFAULT CURRENT_TIMESTAMP
+                )
+            `);
+        }
+    },
+    {
+        version: 3,
+        description: 'Price cache table',
+        up: () => {
+            db.exec(`
+                CREATE TABLE IF NOT EXISTS price_cache (
+                    ticker TEXT PRIMARY KEY,
+                    price INTEGER NOT NULL,
+                    change INTEGER,
+                    changePercent REAL,
+                    name TEXT,
+                    updatedAt TEXT DEFAULT CURRENT_TIMESTAMP
+                )
+            `);
+        }
+    },
+    {
+        version: 4,
+        description: 'Settings table',
+        up: () => {
+            db.exec(`
+                CREATE TABLE IF NOT EXISTS settings (
+                    key TEXT PRIMARY KEY,
+                    value TEXT NOT NULL,
+                    updatedAt TEXT DEFAULT CURRENT_TIMESTAMP
+                )
+            `);
+            db.prepare(`INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)`).run('live_prices_enabled', 'true');
+        }
+    },
+    {
+        version: 5,
+        description: 'Performance indexes',
+        up: () => {
+            db.exec(`
+                CREATE INDEX IF NOT EXISTS idx_trades_status ON trades(status);
+                CREATE INDEX IF NOT EXISTS idx_trades_ticker ON trades(ticker);
+                CREATE INDEX IF NOT EXISTS idx_trades_openedDate ON trades(openedDate);
+                CREATE INDEX IF NOT EXISTS idx_trades_expirationDate ON trades(expirationDate);
+                CREATE INDEX IF NOT EXISTS idx_trades_closedDate ON trades(closedDate);
+                CREATE INDEX IF NOT EXISTS idx_trades_parentTradeId ON trades(parentTradeId);
+                CREATE INDEX IF NOT EXISTS idx_trades_status_openedDate ON trades(status, openedDate);
+                CREATE INDEX IF NOT EXISTS idx_positions_ticker ON positions(ticker);
+                CREATE INDEX IF NOT EXISTS idx_positions_soldDate ON positions(soldDate);
+                CREATE INDEX IF NOT EXISTS idx_positions_acquiredFromTradeId ON positions(acquiredFromTradeId);
+            `);
+        }
+    },
+    {
+        version: 6,
+        description: 'Data integrity constraints',
+        up: () => {
+            // Skip if already migrated via settings
+            const alreadyDone = db.prepare('SELECT value FROM settings WHERE key = ?').get('integrity_migration_v1');
+            if (alreadyDone) return;
+
+            db.pragma('foreign_keys = OFF');
+            db.exec(`
+                CREATE TABLE trades_integrity (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    ticker TEXT NOT NULL CHECK(length(ticker) > 0),
+                    type TEXT NOT NULL CHECK(type IN ('CSP', 'CC')),
+                    strike REAL NOT NULL CHECK(strike > 0),
+                    quantity INTEGER NOT NULL DEFAULT 1 CHECK(quantity >= 1),
+                    delta REAL CHECK(delta IS NULL OR (delta >= 0 AND delta <= 1)),
+                    entryPrice REAL NOT NULL CHECK(entryPrice >= 0),
+                    closePrice REAL DEFAULT 0 CHECK(closePrice >= 0),
+                    openedDate TEXT NOT NULL,
+                    expirationDate TEXT NOT NULL,
+                    closedDate TEXT,
+                    status TEXT NOT NULL DEFAULT 'Open' CHECK(status IN ('Open', 'Expired', 'Assigned', 'Closed', 'Rolled')),
+                    parentTradeId INTEGER REFERENCES trades_integrity(id) ON DELETE SET NULL,
+                    notes TEXT,
+                    createdAt TEXT DEFAULT CURRENT_TIMESTAMP,
+                    updatedAt TEXT DEFAULT CURRENT_TIMESTAMP,
+                    CHECK(expirationDate >= openedDate)
+                );
+                INSERT INTO trades_integrity SELECT * FROM trades;
+                DROP TABLE trades;
+                ALTER TABLE trades_integrity RENAME TO trades;
+
+                CREATE TABLE positions_integrity (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    ticker TEXT NOT NULL CHECK(length(ticker) > 0),
+                    shares INTEGER NOT NULL CHECK(shares >= 1),
+                    costBasis REAL NOT NULL CHECK(costBasis >= 0),
+                    acquiredDate TEXT NOT NULL,
+                    acquiredFromTradeId INTEGER REFERENCES trades(id) ON DELETE CASCADE,
+                    soldDate TEXT,
+                    salePrice REAL CHECK(salePrice IS NULL OR salePrice >= 0),
+                    soldViaTradeId INTEGER REFERENCES trades(id) ON DELETE SET NULL,
+                    capitalGainLoss REAL,
+                    createdAt TEXT DEFAULT CURRENT_TIMESTAMP,
+                    updatedAt TEXT DEFAULT CURRENT_TIMESTAMP
+                );
+                INSERT INTO positions_integrity SELECT * FROM positions;
+                DROP TABLE positions;
+                ALTER TABLE positions_integrity RENAME TO positions;
+            `);
+            db.exec(`
+                CREATE INDEX idx_trades_status ON trades(status);
+                CREATE INDEX idx_trades_ticker ON trades(ticker);
+                CREATE INDEX idx_trades_openedDate ON trades(openedDate);
+                CREATE INDEX idx_trades_expirationDate ON trades(expirationDate);
+                CREATE INDEX idx_trades_closedDate ON trades(closedDate);
+                CREATE INDEX idx_trades_parentTradeId ON trades(parentTradeId);
+                CREATE INDEX idx_trades_status_openedDate ON trades(status, openedDate);
+                CREATE INDEX idx_positions_ticker ON positions(ticker);
+                CREATE INDEX idx_positions_soldDate ON positions(soldDate);
+                CREATE INDEX idx_positions_acquiredFromTradeId ON positions(acquiredFromTradeId);
+            `);
+            db.prepare('INSERT INTO settings (key, value) VALUES (?, ?)').run('integrity_migration_v1', 'true');
+        }
+    },
+    {
+        version: 7,
+        description: 'Prices to INTEGER cents',
+        up: () => {
+            // Skip if already migrated via settings
+            const alreadyDone = db.prepare('SELECT value FROM settings WHERE key = ?').get('cents_migration_v1');
+            if (alreadyDone) return;
+
+            db.pragma('foreign_keys = OFF');
+            db.exec(`
+                CREATE TABLE trades_cents (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    ticker TEXT NOT NULL CHECK(length(ticker) > 0),
+                    type TEXT NOT NULL CHECK(type IN ('CSP', 'CC')),
+                    strike INTEGER NOT NULL CHECK(strike > 0),
+                    quantity INTEGER NOT NULL DEFAULT 1 CHECK(quantity >= 1),
+                    delta REAL CHECK(delta IS NULL OR (delta >= 0 AND delta <= 1)),
+                    entryPrice INTEGER NOT NULL CHECK(entryPrice >= 0),
+                    closePrice INTEGER DEFAULT 0 CHECK(closePrice >= 0),
+                    openedDate TEXT NOT NULL,
+                    expirationDate TEXT NOT NULL,
+                    closedDate TEXT,
+                    status TEXT NOT NULL DEFAULT 'Open' CHECK(status IN ('Open', 'Expired', 'Assigned', 'Closed', 'Rolled')),
+                    parentTradeId INTEGER REFERENCES trades_cents(id) ON DELETE SET NULL,
+                    notes TEXT,
+                    createdAt TEXT DEFAULT CURRENT_TIMESTAMP,
+                    updatedAt TEXT DEFAULT CURRENT_TIMESTAMP,
+                    CHECK(expirationDate >= openedDate)
+                );
+                INSERT INTO trades_cents (id, ticker, type, strike, quantity, delta, entryPrice, closePrice, openedDate, expirationDate, closedDate, status, parentTradeId, notes, createdAt, updatedAt)
+                SELECT id, ticker, type, CAST(ROUND(strike * 100) AS INTEGER), quantity, delta, CAST(ROUND(entryPrice * 100) AS INTEGER), CAST(ROUND(closePrice * 100) AS INTEGER), openedDate, expirationDate, closedDate, status, parentTradeId, notes, createdAt, updatedAt FROM trades;
+                DROP TABLE trades;
+                ALTER TABLE trades_cents RENAME TO trades;
+
+                CREATE TABLE positions_cents (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    ticker TEXT NOT NULL CHECK(length(ticker) > 0),
+                    shares INTEGER NOT NULL CHECK(shares >= 1),
+                    costBasis INTEGER NOT NULL CHECK(costBasis >= 0),
+                    acquiredDate TEXT NOT NULL,
+                    acquiredFromTradeId INTEGER REFERENCES trades(id) ON DELETE CASCADE,
+                    soldDate TEXT,
+                    salePrice INTEGER CHECK(salePrice IS NULL OR salePrice >= 0),
+                    soldViaTradeId INTEGER REFERENCES trades(id) ON DELETE SET NULL,
+                    capitalGainLoss INTEGER,
+                    createdAt TEXT DEFAULT CURRENT_TIMESTAMP,
+                    updatedAt TEXT DEFAULT CURRENT_TIMESTAMP
+                );
+                INSERT INTO positions_cents (id, ticker, shares, costBasis, acquiredDate, acquiredFromTradeId, soldDate, salePrice, soldViaTradeId, capitalGainLoss, createdAt, updatedAt)
+                SELECT id, ticker, shares, CAST(ROUND(costBasis * 100) AS INTEGER), acquiredDate, acquiredFromTradeId, soldDate, CAST(ROUND(salePrice * 100) AS INTEGER), soldViaTradeId, CAST(ROUND(capitalGainLoss * 100) AS INTEGER), createdAt, updatedAt FROM positions;
+                DROP TABLE positions;
+                ALTER TABLE positions_cents RENAME TO positions;
+
+                CREATE TABLE price_cache_cents (
+                    ticker TEXT PRIMARY KEY,
+                    price INTEGER NOT NULL,
+                    change INTEGER,
+                    changePercent REAL,
+                    name TEXT,
+                    updatedAt TEXT DEFAULT CURRENT_TIMESTAMP
+                );
+                INSERT INTO price_cache_cents (ticker, price, change, changePercent, name, updatedAt)
+                SELECT ticker, CAST(ROUND(price * 100) AS INTEGER), CAST(ROUND(change * 100) AS INTEGER), changePercent, name, updatedAt FROM price_cache;
+                DROP TABLE price_cache;
+                ALTER TABLE price_cache_cents RENAME TO price_cache;
+            `);
+            db.exec(`
+                CREATE INDEX idx_trades_status ON trades(status);
+                CREATE INDEX idx_trades_ticker ON trades(ticker);
+                CREATE INDEX idx_trades_openedDate ON trades(openedDate);
+                CREATE INDEX idx_trades_expirationDate ON trades(expirationDate);
+                CREATE INDEX idx_trades_closedDate ON trades(closedDate);
+                CREATE INDEX idx_trades_parentTradeId ON trades(parentTradeId);
+                CREATE INDEX idx_trades_status_openedDate ON trades(status, openedDate);
+                CREATE INDEX idx_positions_ticker ON positions(ticker);
+                CREATE INDEX idx_positions_soldDate ON positions(soldDate);
+                CREATE INDEX idx_positions_acquiredFromTradeId ON positions(acquiredFromTradeId);
+            `);
+            db.prepare('INSERT INTO settings (key, value) VALUES (?, ?)').run('cents_migration_v1', 'true');
+        }
+    }
+];
+
+// Run pending migrations
+const runMigrations = () => {
+    const currentVersion = getSchemaVersion();
+    const pending = migrations.filter(m => m.version > currentVersion);
+
+    if (pending.length === 0) {
+        console.log(`📊 Schema up to date (v${currentVersion})`);
+        return;
+    }
+
+    console.log(`📊 Running ${pending.length} migration(s)...`);
+    for (const m of pending) {
+        console.log(`  → v${m.version}: ${m.description}`);
+        m.up();
+        setSchemaVersion(m.version, m.description);
+    }
+    console.log(`📊 Schema migrated to v${getSchemaVersion()}`);
+};
+
+// Handle legacy databases (pre-versioning)
+// Only register base schema (1-5) so upgrade migrations (6-7) will run
+const handleLegacyDb = () => {
+    const tradesExist = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='trades'").get();
+    const hasVersions = db.prepare('SELECT COUNT(*) as c FROM schema_migrations').get().c > 0;
+
+    if (tradesExist && !hasVersions) {
+        console.log('📊 Legacy database detected, registering existing schema...');
+        const baseMigrations = migrations.filter(m => m.version <= 5);
+        for (const m of baseMigrations) {
+            setSchemaVersion(m.version, `${m.description} (legacy)`);
+        }
+    }
+};
+
+handleLegacyDb();
+runMigrations();
+
+// Re-enable foreign keys after migrations
+db.pragma('foreign_keys = ON');
+
+// All table creation and indexes now handled by schema versioning system above
+
+// ============== Price Conversion Helpers ==============
+// All prices stored as INTEGER cents, converted at API boundary
+
+const toCents = (dollars) => {
+    if (dollars === null || dollars === undefined) return null;
+    return Math.round(Number(dollars) * 100);
+};
+
+const toDollars = (cents) => {
+    if (cents === null || cents === undefined) return null;
+    return cents / 100;
+};
+
+// Convert a trade object from DB (cents) to API (dollars)
+const tradeToApi = (trade) => {
+    if (!trade) return null;
+    return {
+        ...trade,
+        strike: toDollars(trade.strike),
+        entryPrice: toDollars(trade.entryPrice),
+        closePrice: toDollars(trade.closePrice)
+    };
+};
+
+// Convert a position object from DB (cents) to API (dollars)
+const positionToApi = (position) => {
+    if (!position) return null;
+    return {
+        ...position,
+        costBasis: toDollars(position.costBasis),
+        salePrice: toDollars(position.salePrice),
+        capitalGainLoss: toDollars(position.capitalGainLoss)
+    };
+};
 
 // Migration: Fix existing positions cost basis to include premium collected
 // Cost basis should be strike - premium, not just strike
@@ -210,53 +412,62 @@ if (orphanedPositions.changes > 0) {
 }
 
 // Seed example data if database is empty (for demo purposes)
+// NOTE: All prices are in cents (e.g., $220 strike = 22000 cents)
 const tradeCount = db.prepare('SELECT COUNT(*) as count FROM trades').get();
 if (tradeCount.count === 0) {
     console.log('Seeding example trades...');
 
     // Example 1: AAPL - Simple CSP (expired worthless - ideal outcome)
+    // Strike: $220, Premium: $2.80
     db.exec(`
         INSERT INTO trades (ticker, type, strike, quantity, delta, entryPrice, closePrice, openedDate, expirationDate, closedDate, status, parentTradeId)
-        VALUES ('AAPL', 'CSP', 220, 1, 0.25, 2.80, 0, '2025-11-18', '2025-12-20', '2025-12-20', 'Expired', NULL);
+        VALUES ('AAPL', 'CSP', 22000, 1, 0.25, 280, 0, '2025-11-18', '2025-12-20', '2025-12-20', 'Expired', NULL);
     `);
 
     // Example 2: MSFT - Simple CC (expired worthless - ideal outcome)
+    // Strike: $450, Premium: $3.50
     db.exec(`
         INSERT INTO trades (ticker, type, strike, quantity, delta, entryPrice, closePrice, openedDate, expirationDate, closedDate, status, parentTradeId)
-        VALUES ('MSFT', 'CC', 450, 1, 0.30, 3.50, 0, '2025-11-20', '2025-12-20', '2025-12-20', 'Expired', NULL);
+        VALUES ('MSFT', 'CC', 45000, 1, 0.30, 350, 0, '2025-11-20', '2025-12-20', '2025-12-20', 'Expired', NULL);
     `);
 
     // Example 3: META - Rolled CSP chain (rolled out and down for more premium)
+    // Strike: $580, Premium: $4.20, Closed at: $6.50
     db.exec(`
         INSERT INTO trades (ticker, type, strike, quantity, delta, entryPrice, closePrice, openedDate, expirationDate, closedDate, status, parentTradeId)
-        VALUES ('META', 'CSP', 580, 1, 0.28, 4.20, 6.50, '2025-11-15', '2025-12-20', '2025-12-18', 'Rolled', NULL);
+        VALUES ('META', 'CSP', 58000, 1, 0.28, 420, 650, '2025-11-15', '2025-12-20', '2025-12-18', 'Rolled', NULL);
     `);
     const metaRolledId = db.prepare('SELECT last_insert_rowid() as id').get().id;
 
+    // Strike: $560, Premium: $5.80
     db.exec(`
         INSERT INTO trades (ticker, type, strike, quantity, delta, entryPrice, closePrice, openedDate, expirationDate, closedDate, status, parentTradeId)
-        VALUES ('META', 'CSP', 560, 1, 0.25, 5.80, 0, '2025-12-18', '2026-01-17', NULL, 'Open', ${metaRolledId});
+        VALUES ('META', 'CSP', 56000, 1, 0.25, 580, 0, '2025-12-18', '2026-01-17', NULL, 'Open', ${metaRolledId});
     `);
 
     // Example 4: NVDA - CSP Assigned then CC sold (full wheel cycle)
     // First: CSP was assigned (bought 100 shares at strike)
+    // Strike: $130, Premium: $3.80
     db.exec(`
         INSERT INTO trades (ticker, type, strike, quantity, delta, entryPrice, closePrice, openedDate, expirationDate, closedDate, status, parentTradeId)
-        VALUES ('NVDA', 'CSP', 130, 1, 0.32, 3.80, 0, '2025-11-10', '2025-12-06', '2025-12-06', 'Assigned', NULL);
+        VALUES ('NVDA', 'CSP', 13000, 1, 0.32, 380, 0, '2025-11-10', '2025-12-06', '2025-12-06', 'Assigned', NULL);
     `);
     const nvdaCspId = db.prepare('SELECT last_insert_rowid() as id').get().id;
 
     // Then: CC sold on the assigned shares - also assigned (shares called away at $140)
+    // Strike: $140, Premium: $4.50
     db.exec(`
         INSERT INTO trades (ticker, type, strike, quantity, delta, entryPrice, closePrice, openedDate, expirationDate, closedDate, status, parentTradeId)
-        VALUES ('NVDA', 'CC', 140, 1, 0.28, 4.50, 0, '2025-12-09', '2025-12-20', '2025-12-20', 'Assigned', ${nvdaCspId});
+        VALUES ('NVDA', 'CC', 14000, 1, 0.28, 450, 0, '2025-12-09', '2025-12-20', '2025-12-20', 'Assigned', ${nvdaCspId});
     `);
     const nvdaCcId = db.prepare('SELECT last_insert_rowid() as id').get().id;
 
-    // Position: Bought at $130 (CSP assigned), sold at $140 (CC assigned) = $1,000 gain
+    // Position: Bought at $130 (CSP assigned) - $3.80 premium = $126.20 cost basis
+    // Sold at $140 (CC assigned) = $1,380 gain (100 shares * ($140 - $126.20))
+    // All values in cents
     db.exec(`
         INSERT INTO positions (ticker, shares, costBasis, acquiredDate, acquiredFromTradeId, soldDate, salePrice, soldViaTradeId, capitalGainLoss)
-        VALUES ('NVDA', 100, 130, '2025-12-06', ${nvdaCspId}, '2025-12-20', 140, ${nvdaCcId}, 1000);
+        VALUES ('NVDA', 100, 12620, '2025-12-06', ${nvdaCspId}, '2025-12-20', 14000, ${nvdaCcId}, 138000);
     `);
 
     console.log('Example trades seeded!');
@@ -271,6 +482,112 @@ app.use((req, res, next) => {
     req.requestId = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
     next();
 });
+
+// ============== Input Validation ==============
+const VALID_TYPES = ['CSP', 'CC'];
+const VALID_STATUSES = ['Open', 'Expired', 'Assigned', 'Closed', 'Rolled'];
+
+const validateTrade = (trade, isUpdate = false) => {
+    const errors = [];
+
+    // Required fields (only for create, not update)
+    if (!isUpdate) {
+        if (!trade.ticker || typeof trade.ticker !== 'string' || trade.ticker.trim() === '') {
+            errors.push('ticker is required');
+        }
+        if (!trade.type) errors.push('type is required');
+        if (trade.strike === undefined || trade.strike === null) errors.push('strike is required');
+        if (trade.entryPrice === undefined || trade.entryPrice === null) errors.push('entryPrice is required');
+        if (!trade.openedDate) errors.push('openedDate is required');
+        if (!trade.expirationDate) errors.push('expirationDate is required');
+    }
+
+    // Type validation
+    if (trade.type !== undefined && !VALID_TYPES.includes(trade.type)) {
+        errors.push(`type must be one of: ${VALID_TYPES.join(', ')}`);
+    }
+
+    // Status validation
+    if (trade.status !== undefined && !VALID_STATUSES.includes(trade.status)) {
+        errors.push(`status must be one of: ${VALID_STATUSES.join(', ')}`);
+    }
+
+    // Numeric validations
+    if (trade.strike !== undefined && trade.strike !== null) {
+        const strike = Number(trade.strike);
+        if (isNaN(strike) || strike <= 0) errors.push('strike must be a positive number');
+    }
+
+    if (trade.quantity !== undefined && trade.quantity !== null) {
+        const qty = Number(trade.quantity);
+        if (isNaN(qty) || qty < 1 || !Number.isInteger(qty)) errors.push('quantity must be a positive integer');
+    }
+
+    if (trade.entryPrice !== undefined && trade.entryPrice !== null) {
+        const price = Number(trade.entryPrice);
+        if (isNaN(price) || price < 0) errors.push('entryPrice must be a non-negative number');
+    }
+
+    if (trade.closePrice !== undefined && trade.closePrice !== null) {
+        const price = Number(trade.closePrice);
+        if (isNaN(price) || price < 0) errors.push('closePrice must be a non-negative number');
+    }
+
+    if (trade.delta !== undefined && trade.delta !== null && trade.delta !== '') {
+        const delta = Number(trade.delta);
+        if (isNaN(delta) || delta < 0 || delta > 1) errors.push('delta must be between 0 and 1');
+    }
+
+    // Date validations
+    const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+
+    if (trade.openedDate !== undefined && trade.openedDate !== null) {
+        if (!dateRegex.test(trade.openedDate)) errors.push('openedDate must be in YYYY-MM-DD format');
+    }
+
+    if (trade.expirationDate !== undefined && trade.expirationDate !== null) {
+        if (!dateRegex.test(trade.expirationDate)) errors.push('expirationDate must be in YYYY-MM-DD format');
+    }
+
+    if (trade.closedDate !== undefined && trade.closedDate !== null && trade.closedDate !== '') {
+        if (!dateRegex.test(trade.closedDate)) errors.push('closedDate must be in YYYY-MM-DD format');
+    }
+
+    // Date logic: expiration should be >= opened
+    if (trade.openedDate && trade.expirationDate && trade.openedDate > trade.expirationDate) {
+        errors.push('expirationDate must be on or after openedDate');
+    }
+
+    return errors;
+};
+
+const validatePosition = (position, isUpdate = false) => {
+    const errors = [];
+
+    if (!isUpdate) {
+        if (!position.ticker || typeof position.ticker !== 'string') errors.push('ticker is required');
+        if (position.shares === undefined) errors.push('shares is required');
+        if (position.costBasis === undefined) errors.push('costBasis is required');
+        if (!position.acquiredDate) errors.push('acquiredDate is required');
+    }
+
+    if (position.shares !== undefined) {
+        const shares = Number(position.shares);
+        if (isNaN(shares) || shares < 1 || !Number.isInteger(shares)) errors.push('shares must be a positive integer');
+    }
+
+    if (position.costBasis !== undefined) {
+        const cost = Number(position.costBasis);
+        if (isNaN(cost) || cost < 0) errors.push('costBasis must be a non-negative number');
+    }
+
+    if (position.salePrice !== undefined && position.salePrice !== null) {
+        const price = Number(position.salePrice);
+        if (isNaN(price) || price < 0) errors.push('salePrice must be a non-negative number');
+    }
+
+    return errors;
+};
 
 // Response helpers for consistent API format
 const apiResponse = {
@@ -322,7 +639,7 @@ app.get('/api/health', (req, res) => {
         apiResponse.success(res, {
             status: 'healthy',
             database: { connected: true, tradeCount: dbCheck.count },
-            version: process.env.npm_package_version || '0.8.0'
+            version: process.env.npm_package_version || '0.9.0'
         });
     } catch (error) {
         apiResponse.error(res, 'Service unhealthy', 503, { database: error.message });
@@ -388,7 +705,7 @@ app.get('/api/trades', (req, res) => {
 
         const totalPages = Math.ceil(total / limitNum);
 
-        apiResponse.success(res, trades, {
+        apiResponse.success(res, trades.map(tradeToApi), {
             pagination: {
                 page: pageNum,
                 limit: limitNum,
@@ -411,7 +728,7 @@ app.get('/api/trades/:id', (req, res) => {
         if (!trade) {
             return apiResponse.error(res, 'Trade not found', 404);
         }
-        apiResponse.success(res, trade);
+        apiResponse.success(res, tradeToApi(trade));
     } catch (error) {
         console.error('Error fetching trade:', error);
         apiResponse.error(res, 'Failed to fetch trade');
@@ -436,6 +753,12 @@ app.post('/api/trades', (req, res) => {
             parentTradeId,
             notes
         } = req.body;
+
+        // Validate input
+        const validationErrors = validateTrade(req.body, false);
+        if (validationErrors.length > 0) {
+            return apiResponse.error(res, 'Validation failed', 400, validationErrors);
+        }
 
         const tickerUpper = ticker.toUpperCase();
         let resolvedParentTradeId = parentTradeId || null;
@@ -464,11 +787,11 @@ app.post('/api/trades', (req, res) => {
         const result = stmt.run(
             tickerUpper,
             type,
-            strike,
+            toCents(strike),
             quantity || 1,
             delta || null,
-            entryPrice,
-            closePrice || 0,
+            toCents(entryPrice),
+            toCents(closePrice) || 0,
             openedDate,
             expirationDate,
             closedDate || null,
@@ -478,7 +801,7 @@ app.post('/api/trades', (req, res) => {
         );
 
         const newTrade = db.prepare('SELECT * FROM trades WHERE id = ?').get(result.lastInsertRowid);
-        apiResponse.created(res, newTrade);
+        apiResponse.created(res, tradeToApi(newTrade));
     } catch (error) {
         console.error('Error creating trade:', error);
         apiResponse.error(res, 'Failed to create trade');
@@ -494,6 +817,18 @@ app.post('/api/trades/roll', (req, res) => {
             return apiResponse.error(res, 'Missing required fields: originalTradeId, closePrice, newTrade', 400);
         }
 
+        // Validate closePrice
+        const closePriceNum = Number(closePrice);
+        if (isNaN(closePriceNum) || closePriceNum < 0) {
+            return apiResponse.error(res, 'Validation failed', 400, ['closePrice must be a non-negative number']);
+        }
+
+        // Validate the new trade data
+        const validationErrors = validateTrade(newTrade, false);
+        if (validationErrors.length > 0) {
+            return apiResponse.error(res, 'Validation failed', 400, validationErrors);
+        }
+
         const original = db.prepare('SELECT * FROM trades WHERE id = ?').get(originalTradeId);
         if (!original) {
             return apiResponse.error(res, 'Original trade not found', 404);
@@ -505,7 +840,7 @@ app.post('/api/trades/roll', (req, res) => {
                 UPDATE trades
                 SET closePrice = ?, closedDate = ?, status = 'Rolled', updatedAt = CURRENT_TIMESTAMP
                 WHERE id = ?
-            `).run(closePrice, newTrade.openedDate, originalTradeId);
+            `).run(toCents(closePrice), newTrade.openedDate, originalTradeId);
 
             // Create new rolled trade
             const result = db.prepare(`
@@ -514,11 +849,11 @@ app.post('/api/trades/roll', (req, res) => {
             `).run(
                 original.ticker,
                 newTrade.type || original.type,
-                newTrade.strike,
+                toCents(newTrade.strike),
                 newTrade.quantity || original.quantity,
                 newTrade.delta || null,
-                newTrade.entryPrice,
-                newTrade.closePrice || 0,
+                toCents(newTrade.entryPrice),
+                toCents(newTrade.closePrice) || 0,
                 newTrade.openedDate,
                 newTrade.expirationDate,
                 newTrade.closedDate || null,
@@ -532,7 +867,7 @@ app.post('/api/trades/roll', (req, res) => {
 
         const newTradeId = rollTransaction();
         const createdTrade = db.prepare('SELECT * FROM trades WHERE id = ?').get(newTradeId);
-        apiResponse.created(res, createdTrade);
+        apiResponse.created(res, tradeToApi(createdTrade));
     } catch (error) {
         console.error('Error rolling trade:', error);
         apiResponse.error(res, 'Failed to roll trade');
@@ -574,11 +909,11 @@ app.post('/api/trades/import', (req, res) => {
                         const result = stmt.run(
                             trade.ticker?.toUpperCase(),
                             trade.type,
-                            trade.strike,
+                            toCents(trade.strike),
                             trade.quantity || 1,
                             trade.delta || null,
-                            trade.entryPrice,
-                            trade.closePrice || 0,
+                            toCents(trade.entryPrice),
+                            toCents(trade.closePrice) || 0,
                             trade.openedDate,
                             trade.expirationDate,
                             trade.closedDate || null,
@@ -615,14 +950,20 @@ app.put('/api/trades/:id', (req, res) => {
             return apiResponse.error(res, 'Trade not found', 404);
         }
 
-        // Use request body values or fall back to current trade values
+        // Validate input (partial validation for updates)
+        const validationErrors = validateTrade(req.body, true);
+        if (validationErrors.length > 0) {
+            return apiResponse.error(res, 'Validation failed', 400, validationErrors);
+        }
+
+        // Use request body values (dollars) or fall back to current trade values (convert from cents)
         const ticker = req.body.ticker ?? currentTrade.ticker;
         const type = req.body.type ?? currentTrade.type;
-        const strike = req.body.strike ?? currentTrade.strike;
+        const strike = req.body.strike ?? toDollars(currentTrade.strike);
         const quantity = req.body.quantity ?? currentTrade.quantity;
         const delta = req.body.delta ?? currentTrade.delta;
-        const entryPrice = req.body.entryPrice ?? currentTrade.entryPrice;
-        const closePrice = req.body.closePrice ?? currentTrade.closePrice;
+        const entryPrice = req.body.entryPrice ?? toDollars(currentTrade.entryPrice);
+        const closePrice = req.body.closePrice ?? toDollars(currentTrade.closePrice);
         const openedDate = req.body.openedDate ?? currentTrade.openedDate;
         const expirationDate = req.body.expirationDate ?? currentTrade.expirationDate;
         const closedDate = req.body.closedDate ?? currentTrade.closedDate;
@@ -640,11 +981,11 @@ app.put('/api/trades/:id', (req, res) => {
         const result = stmt.run(
             ticker.toUpperCase(),
             type,
-            strike,
+            toCents(strike),
             quantity || 1,
             delta || null,
-            entryPrice,
-            closePrice || 0,
+            toCents(entryPrice),
+            toCents(closePrice) || 0,
             openedDate,
             expirationDate,
             closedDate || null,
@@ -659,6 +1000,7 @@ app.put('/api/trades/:id', (req, res) => {
         }
 
         const updatedTrade = db.prepare('SELECT * FROM trades WHERE id = ?').get(req.params.id);
+        const updatedTradeApi = tradeToApi(updatedTrade);
 
         // Handle position creation/closing on assignment
         if (status === 'Assigned' && currentTrade.status !== 'Assigned') {
@@ -668,11 +1010,11 @@ app.put('/api/trades/:id', (req, res) => {
 
             if (type === 'CSP') {
                 // CSP Assigned: Create new position (cost basis = strike - premium collected)
-                const adjustedCostBasis = strike - entryPrice;
+                const adjustedCostBasis = strike - entryPrice; // in dollars
                 db.prepare(`
                     INSERT INTO positions (ticker, shares, costBasis, acquiredDate, acquiredFromTradeId)
                     VALUES (?, ?, ?, ?, ?)
-                `).run(tickerUpper, shares, adjustedCostBasis, assignmentDate, req.params.id);
+                `).run(tickerUpper, shares, toCents(adjustedCostBasis), assignmentDate, req.params.id);
                 console.log(`📈 Position created: ${shares} shares of ${tickerUpper} at $${adjustedCostBasis.toFixed(2)} (strike $${strike} - premium $${entryPrice})`);
             } else if (type === 'CC') {
                 // CC Assigned: Close oldest open position (FIFO)
@@ -684,18 +1026,20 @@ app.put('/api/trades/:id', (req, res) => {
                 `).get(tickerUpper);
 
                 if (openPosition) {
-                    const capitalGainLoss = (strike - openPosition.costBasis) * openPosition.shares;
+                    // openPosition.costBasis is in cents, convert to dollars for calculation
+                    const costBasisDollars = toDollars(openPosition.costBasis);
+                    const capitalGainLoss = (strike - costBasisDollars) * openPosition.shares; // in dollars
                     db.prepare(`
                         UPDATE positions
                         SET soldDate = ?, salePrice = ?, soldViaTradeId = ?, capitalGainLoss = ?, updatedAt = CURRENT_TIMESTAMP
                         WHERE id = ?
-                    `).run(assignmentDate, strike, req.params.id, capitalGainLoss, openPosition.id);
+                    `).run(assignmentDate, toCents(strike), req.params.id, toCents(capitalGainLoss), openPosition.id);
                     console.log(`📉 Position closed: ${openPosition.shares} shares of ${tickerUpper} at $${strike} (G/L: $${capitalGainLoss})`);
                 }
             }
         }
 
-        apiResponse.success(res, updatedTrade);
+        apiResponse.success(res, updatedTradeApi);
     } catch (error) {
         console.error('Error updating trade:', error);
         apiResponse.error(res, 'Failed to update trade');
@@ -765,34 +1109,45 @@ app.get('/api/stats', (req, res) => {
             WHERE parentTradeId IS NULL
         `).get();
 
-        // For win rate, we need to calculate chain P/L (requires iteration for now)
-        // This is still needed because chain P/L spans multiple rows
-        const chainRoots = db.prepare(`SELECT * FROM trades WHERE parentTradeId IS NULL`).all();
-        const allTrades = db.prepare(`SELECT * FROM trades`).all();
+        // Calculate chain P/L using recursive CTE (no N+1 queries)
+        const chainPnLStats = db.prepare(`
+            WITH RECURSIVE chain_walk AS (
+                -- Base: start from root trades (no parent)
+                SELECT
+                    id as root_id,
+                    id as current_id,
+                    (entryPrice - closePrice) * quantity * 100 as chain_pnl,
+                    status as final_status
+                FROM trades
+                WHERE parentTradeId IS NULL
 
-        let winningChains = 0;
-        let resolvedCount = 0;
+                UNION ALL
 
-        for (const root of chainRoots) {
-            let chainPnL = (root.entryPrice - root.closePrice) * root.quantity * 100;
-            let currentId = root.id;
-            let finalStatus = root.status;
+                -- Recursive: follow children
+                SELECT
+                    cw.root_id,
+                    t.id as current_id,
+                    cw.chain_pnl + (t.entryPrice - t.closePrice) * t.quantity * 100,
+                    t.status as final_status
+                FROM chain_walk cw
+                JOIN trades t ON t.parentTradeId = cw.current_id
+            ),
+            -- Get final state of each chain (last trade in chain)
+            chain_finals AS (
+                SELECT root_id, chain_pnl, final_status
+                FROM chain_walk cw
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM trades t WHERE t.parentTradeId = cw.current_id
+                )
+            )
+            SELECT
+                COUNT(CASE WHEN final_status NOT IN ('Open', 'Rolled') AND chain_pnl > 0 THEN 1 END) as winning_chains,
+                COUNT(CASE WHEN final_status NOT IN ('Open', 'Rolled') THEN 1 END) as resolved_chains
+            FROM chain_finals
+        `).get();
 
-            // Follow the chain
-            let child = allTrades.find(t => t.parentTradeId === currentId);
-            while (child) {
-                chainPnL += (child.entryPrice - child.closePrice) * child.quantity * 100;
-                finalStatus = child.status;
-                currentId = child.id;
-                child = allTrades.find(t => t.parentTradeId === currentId);
-            }
-
-            if (finalStatus !== 'Open' && finalStatus !== 'Rolled') {
-                resolvedCount++;
-                if (chainPnL > 0) winningChains++;
-            }
-        }
-
+        const winningChains = chainPnLStats.winning_chains || 0;
+        const resolvedCount = chainPnLStats.resolved_chains || 0;
         const winRate = resolvedCount > 0 ? (winningChains / resolvedCount) * 100 : 0;
 
         // Monthly P/L aggregation
@@ -839,13 +1194,14 @@ app.get('/api/stats', (req, res) => {
             FROM positions
         `).get();
 
+        // Convert all money values from cents to dollars
         apiResponse.success(res, {
-            totalPnL: mainStats.totalPnL,
-            totalPremiumCollected: mainStats.totalPremium,
+            totalPnL: toDollars(mainStats.totalPnL),
+            totalPremiumCollected: toDollars(mainStats.totalPremium),
             totalTrades: mainStats.totalTrades,
             openTradesCount: mainStats.openCount,
             completedTradesCount: mainStats.expiredCount + mainStats.assignedCount + mainStats.closedCount,
-            capitalAtRisk: mainStats.capitalAtRisk,
+            capitalAtRisk: toDollars(mainStats.capitalAtRisk),
             winningChains,
             totalChains: chainStats.totalChains,
             resolvedChains: resolvedCount,
@@ -854,14 +1210,14 @@ app.get('/api/stats', (req, res) => {
             totalAssigned: mainStats.assignedCount,
             totalExpired: mainStats.expiredCount,
             totalRolled: mainStats.rolledCount,
-            monthlyStats: Object.fromEntries(monthlyStats.map(m => [m.month, m.pnl])),
-            tickerStats: Object.fromEntries(tickerStats.map(t => [t.ticker, t.pnl])),
-            bestTicker,
+            monthlyStats: Object.fromEntries(monthlyStats.map(m => [m.month, toDollars(m.pnl)])),
+            tickerStats: Object.fromEntries(tickerStats.map(t => [t.ticker, toDollars(t.pnl)])),
+            bestTicker: bestTicker ? { ...bestTicker, pnl: toDollars(bestTicker.pnl) } : null,
             // Capital gains from stock positions
-            realizedCapitalGL: positionStats.realizedCapitalGL,
+            realizedCapitalGL: toDollars(positionStats.realizedCapitalGL),
             openPositions: positionStats.openPositions,
             closedPositions: positionStats.closedPositions,
-            totalPnLWithCapitalGains: mainStats.totalPnL + positionStats.realizedCapitalGL
+            totalPnLWithCapitalGains: toDollars(mainStats.totalPnL + positionStats.realizedCapitalGL)
         });
     } catch (error) {
         console.error('Error fetching stats:', error);
@@ -889,10 +1245,10 @@ app.get('/api/positions/summary', (req, res) => {
         `).all();
 
         apiResponse.success(res, {
-            realizedGainLoss: realizedStats.realizedGainLoss,
+            realizedGainLoss: toDollars(realizedStats.realizedGainLoss),
             closedPositions: realizedStats.closedPositions,
             openPositions: openPositions.length,
-            openPositionsList: openPositions
+            openPositionsList: openPositions.map(positionToApi)
         });
     } catch (error) {
         console.error('Error fetching positions summary:', error);
@@ -917,7 +1273,7 @@ app.get('/api/positions', (req, res) => {
         query += ' ORDER BY acquiredDate DESC';
 
         const positions = db.prepare(query).all(...params);
-        apiResponse.success(res, positions);
+        apiResponse.success(res, positions.map(positionToApi));
     } catch (error) {
         console.error('Error fetching positions:', error);
         apiResponse.error(res, 'Failed to fetch positions');
@@ -931,7 +1287,7 @@ app.get('/api/positions/:id', (req, res) => {
         if (!position) {
             return apiResponse.error(res, 'Position not found', 404);
         }
-        apiResponse.success(res, position);
+        apiResponse.success(res, positionToApi(position));
     } catch (error) {
         console.error('Error fetching position:', error);
         apiResponse.error(res, 'Failed to fetch position');
@@ -943,6 +1299,12 @@ app.post('/api/positions', (req, res) => {
     try {
         const { ticker, shares, costBasis, acquiredDate, acquiredFromTradeId } = req.body;
 
+        // Validate input
+        const validationErrors = validatePosition(req.body, false);
+        if (validationErrors.length > 0) {
+            return apiResponse.error(res, 'Validation failed', 400, validationErrors);
+        }
+
         const stmt = db.prepare(`
             INSERT INTO positions (ticker, shares, costBasis, acquiredDate, acquiredFromTradeId)
             VALUES (?, ?, ?, ?, ?)
@@ -951,13 +1313,13 @@ app.post('/api/positions', (req, res) => {
         const result = stmt.run(
             ticker.toUpperCase(),
             shares,
-            costBasis,
+            toCents(costBasis),
             acquiredDate,
             acquiredFromTradeId || null
         );
 
         const newPosition = db.prepare('SELECT * FROM positions WHERE id = ?').get(result.lastInsertRowid);
-        apiResponse.created(res, newPosition);
+        apiResponse.created(res, positionToApi(newPosition));
     } catch (error) {
         console.error('Error creating position:', error);
         apiResponse.error(res, 'Failed to create position');
@@ -969,13 +1331,20 @@ app.put('/api/positions/:id', (req, res) => {
     try {
         const { soldDate, salePrice, soldViaTradeId } = req.body;
 
+        // Validate input
+        const validationErrors = validatePosition(req.body, true);
+        if (validationErrors.length > 0) {
+            return apiResponse.error(res, 'Validation failed', 400, validationErrors);
+        }
+
         const position = db.prepare('SELECT * FROM positions WHERE id = ?').get(req.params.id);
         if (!position) {
             return apiResponse.error(res, 'Position not found', 404);
         }
 
-        // Calculate capital gain/loss
-        const capitalGainLoss = (salePrice - position.costBasis) * position.shares;
+        // Calculate capital gain/loss (salePrice is dollars from frontend, costBasis is cents in DB)
+        const costBasisDollars = toDollars(position.costBasis);
+        const capitalGainLoss = (salePrice - costBasisDollars) * position.shares;
 
         const stmt = db.prepare(`
             UPDATE positions
@@ -983,10 +1352,10 @@ app.put('/api/positions/:id', (req, res) => {
             WHERE id = ?
         `);
 
-        stmt.run(soldDate, salePrice, soldViaTradeId || null, capitalGainLoss, req.params.id);
+        stmt.run(soldDate, toCents(salePrice), soldViaTradeId || null, toCents(capitalGainLoss), req.params.id);
 
         const updatedPosition = db.prepare('SELECT * FROM positions WHERE id = ?').get(req.params.id);
-        apiResponse.success(res, updatedPosition);
+        apiResponse.success(res, positionToApi(updatedPosition));
     } catch (error) {
         console.error('Error updating position:', error);
         apiResponse.error(res, 'Failed to update position');
@@ -1017,10 +1386,16 @@ app.get('/api/prices/:ticker', async (req, res) => {
         // Check settings
         const setting = db.prepare('SELECT value FROM settings WHERE key = ?').get('live_prices_enabled');
         if (!setting || setting.value !== 'true') {
-            // Return cached price if available
+            // Return cached price if available (convert from cents to dollars)
             const cached = db.prepare('SELECT * FROM price_cache WHERE ticker = ?').get(ticker);
             if (cached) {
-                return apiResponse.success(res, { ...cached, source: 'cache', live: false });
+                return apiResponse.success(res, {
+                    ...cached,
+                    price: toDollars(cached.price),
+                    change: toDollars(cached.change),
+                    source: 'cache',
+                    live: false
+                });
             }
             return apiResponse.error(res, 'Live prices disabled and no cached price available', 404);
         }
@@ -1036,12 +1411,13 @@ app.get('/api/prices/:ticker', async (req, res) => {
             if (response.ok) {
                 const data = await response.json();
 
-                // Update cache
+                // Update cache (store as cents)
                 db.prepare(`
                     INSERT OR REPLACE INTO price_cache (ticker, price, change, changePercent, name, updatedAt)
                     VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-                `).run(ticker, data.Price, data.ChangeAmount, data.ChangePercentage, data.Name);
+                `).run(ticker, toCents(data.Price), toCents(data.ChangeAmount), data.ChangePercentage, data.Name);
 
+                // Return live price (already in dollars from API)
                 return apiResponse.success(res, {
                     ticker,
                     price: data.Price,
@@ -1056,13 +1432,13 @@ app.get('/api/prices/:ticker', async (req, res) => {
             console.error('Error fetching live price:', fetchError);
         }
 
-        // Fallback to cache
+        // Fallback to cache (convert from cents to dollars)
         const cached = db.prepare('SELECT * FROM price_cache WHERE ticker = ?').get(ticker);
         if (cached) {
             return apiResponse.success(res, {
                 ticker: cached.ticker,
-                price: cached.price,
-                change: cached.change,
+                price: toDollars(cached.price),
+                change: toDollars(cached.change),
                 changePercent: cached.changePercent,
                 name: cached.name,
                 source: 'cache',
@@ -1090,52 +1466,79 @@ app.post('/api/prices/batch', async (req, res) => {
         const setting = db.prepare('SELECT value FROM settings WHERE key = ?').get('live_prices_enabled');
         const livePricesEnabled = setting && setting.value === 'true';
 
-        const results = {};
+        const uniqueTickers = [...new Set(tickers.slice(0, 20).map(t => t.toUpperCase()))];
 
-        for (const ticker of tickers.slice(0, 20)) { // Limit to 20
-            const t = ticker.toUpperCase();
-            try {
-                if (!livePricesEnabled) {
-                    // Only return cached prices when live is disabled
-                    const cached = db.prepare('SELECT * FROM price_cache WHERE ticker = ?').get(t);
-                    if (cached) {
-                        results[t] = { ...cached, live: false };
-                    }
-                    continue;
+        // If live prices disabled, return cached prices only (convert from cents to dollars)
+        if (!livePricesEnabled) {
+            const results = {};
+            for (const t of uniqueTickers) {
+                const cached = db.prepare('SELECT * FROM price_cache WHERE ticker = ?').get(t);
+                if (cached) {
+                    results[t] = {
+                        ...cached,
+                        price: toDollars(cached.price),
+                        change: toDollars(cached.change),
+                        live: false
+                    };
                 }
+            }
+            return apiResponse.success(res, results);
+        }
 
-                let response = await fetch(`https://stockprices.dev/api/stocks/${t}`, { signal: AbortSignal.timeout(5000) });
+        // Fetch all prices concurrently with Promise.all()
+        const fetchPrice = async (ticker) => {
+            try {
+                let response = await fetch(`https://stockprices.dev/api/stocks/${ticker}`, { signal: AbortSignal.timeout(5000) });
                 if (!response.ok) {
-                    response = await fetch(`https://stockprices.dev/api/etfs/${t}`, { signal: AbortSignal.timeout(5000) });
+                    response = await fetch(`https://stockprices.dev/api/etfs/${ticker}`, { signal: AbortSignal.timeout(5000) });
                 }
 
                 if (response.ok) {
                     const data = await response.json();
-                    results[t] = {
-                        price: data.Price,
-                        change: data.ChangeAmount,
-                        changePercent: data.ChangePercentage,
-                        name: data.Name,
-                        live: true
-                    };
-
-                    // Update cache
+                    // Update cache (store as cents)
                     db.prepare(`
                         INSERT OR REPLACE INTO price_cache (ticker, price, change, changePercent, name, updatedAt)
                         VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-                    `).run(t, data.Price, data.ChangeAmount, data.ChangePercentage, data.Name);
-                } else {
-                    // Try cache
-                    const cached = db.prepare('SELECT * FROM price_cache WHERE ticker = ?').get(t);
-                    if (cached) {
-                        results[t] = { ...cached, live: false };
-                    }
+                    `).run(ticker, toCents(data.Price), toCents(data.ChangeAmount), data.ChangePercentage, data.Name);
+
+                    // Return live price (already in dollars from API)
+                    return {
+                        ticker,
+                        data: {
+                            price: data.Price,
+                            change: data.ChangeAmount,
+                            changePercent: data.ChangePercentage,
+                            name: data.Name,
+                            live: true
+                        }
+                    };
                 }
             } catch (e) {
-                const cached = db.prepare('SELECT * FROM price_cache WHERE ticker = ?').get(t);
-                if (cached) {
-                    results[t] = { ...cached, live: false };
-                }
+                // Fall through to cache
+            }
+
+            // Fallback to cache (convert from cents to dollars)
+            const cached = db.prepare('SELECT * FROM price_cache WHERE ticker = ?').get(ticker);
+            if (cached) {
+                return {
+                    ticker,
+                    data: {
+                        ...cached,
+                        price: toDollars(cached.price),
+                        change: toDollars(cached.change),
+                        live: false
+                    }
+                };
+            }
+            return { ticker, data: null };
+        };
+
+        const priceResults = await Promise.all(uniqueTickers.map(fetchPrice));
+
+        const results = {};
+        for (const { ticker, data } of priceResults) {
+            if (data) {
+                results[ticker] = data;
             }
         }
 

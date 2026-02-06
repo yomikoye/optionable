@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { X, RefreshCw } from 'lucide-react';
 import Papa from 'papaparse';
 
@@ -6,6 +6,10 @@ import Papa from 'papaparse';
 import { API_URL, TRADES_PER_PAGE, APP_VERSION } from './utils/constants';
 import { formatCurrency } from './utils/formatters';
 import { calculateMetrics, calculateDaysHeld } from './utils/calculations';
+
+// Hooks
+import { useTheme } from './hooks/useTheme';
+import { useTrades } from './hooks/useTrades';
 
 // Components
 import {
@@ -22,9 +26,32 @@ import {
 
 // --- Main Component ---
 export default function App() {
-    const [trades, setTrades] = useState([]);
-    const [loading, setLoading] = useState(true);
-    const [error, setError] = useState(null);
+    // Capital gains stats - defined early so it can be used in useTrades callback
+    const [capitalGainsStats, setCapitalGainsStats] = useState({
+        realizedCapitalGL: 0,
+        openPositions: 0,
+        closedPositions: 0
+    });
+
+    const fetchCapitalGainsStats = useCallback(async () => {
+        try {
+            const response = await fetch(`${API_URL}/stats`);
+            if (!response.ok) return;
+            const json = await response.json();
+            setCapitalGainsStats({
+                realizedCapitalGL: json.data.realizedCapitalGL || 0,
+                openPositions: json.data.openPositions || 0,
+                closedPositions: json.data.closedPositions || 0
+            });
+        } catch (err) {
+            console.error('Error fetching capital gains stats:', err);
+        }
+    }, []);
+
+    // Use hooks for trades and theme
+    const { trades, loading, error, setError, fetchTrades, refreshAll } = useTrades(fetchCapitalGainsStats);
+    const { darkMode, setDarkMode } = useTheme();
+
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [editingId, setEditingId] = useState(null);
     const [currentPage, setCurrentPage] = useState(1);
@@ -58,13 +85,6 @@ export default function App() {
     const [sortConfig, setSortConfig] = useState({ key: null, direction: 'desc' });
     const [chartPeriod, setChartPeriod] = useState('all'); // '1m', '3m', '6m', 'ytd', 'all'
 
-    // Capital gains stats from API
-    const [capitalGainsStats, setCapitalGainsStats] = useState({
-        realizedCapitalGL: 0,
-        openPositions: 0,
-        closedPositions: 0
-    });
-
     // App settings
     const [appSettings, setAppSettings] = useState({
         confirm_expire_enabled: 'true' // Default to true
@@ -78,26 +98,6 @@ export default function App() {
         setToast({ message, type });
         setTimeout(() => setToast(null), 3000);
     };
-
-    // Theme state (light mode is default)
-    const [darkMode, setDarkMode] = useState(() => {
-        if (typeof window !== 'undefined') {
-            const saved = localStorage.getItem('theme');
-            return saved === 'dark'; // Default to light unless explicitly set to dark
-        }
-        return false;
-    });
-
-    // Apply dark mode class to document
-    useEffect(() => {
-        if (darkMode) {
-            document.documentElement.classList.add('dark');
-            localStorage.setItem('theme', 'dark');
-        } else {
-            document.documentElement.classList.remove('dark');
-            localStorage.setItem('theme', 'light');
-        }
-    }, [darkMode]);
 
     // Keyboard shortcuts
     useEffect(() => {
@@ -149,37 +149,6 @@ export default function App() {
     }, [isModalOpen, showPositions, showSettings, showHelp]);
 
     // --- Data Fetching ---
-    const fetchTrades = async () => {
-        try {
-            // Request all trades (limit=1000) for client-side filtering/stats
-            const response = await fetch(`${API_URL}/trades?limit=1000`);
-            if (!response.ok) throw new Error('Failed to fetch trades');
-            const json = await response.json();
-            setTrades(json.data);
-            setError(null);
-        } catch (err) {
-            console.error('Error fetching trades:', err);
-            setError('Failed to load trades. Please try again.');
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    const fetchCapitalGainsStats = async () => {
-        try {
-            const response = await fetch(`${API_URL}/stats`);
-            if (!response.ok) return;
-            const json = await response.json();
-            setCapitalGainsStats({
-                realizedCapitalGL: json.data.realizedCapitalGL || 0,
-                openPositions: json.data.openPositions || 0,
-                closedPositions: json.data.closedPositions || 0
-            });
-        } catch (err) {
-            console.error('Error fetching capital gains stats:', err);
-        }
-    };
-
     const fetchSettings = async () => {
         try {
             const response = await fetch(`${API_URL}/settings`);
@@ -194,10 +163,9 @@ export default function App() {
     };
 
     useEffect(() => {
-        fetchTrades();
         fetchCapitalGainsStats();
         fetchSettings();
-    }, []);
+    }, [fetchCapitalGainsStats]);
 
     // --- Filtering & Sorting ---
     const filteredAndSortedTrades = useMemo(() => {
@@ -211,17 +179,28 @@ export default function App() {
 
         // Sort if sort config is set
         if (sortConfig.key) {
+            // Pre-compute metrics/values once before sorting (avoid O(n log n) recalculations)
+            const needsMetrics = ['pnl', 'roi', 'annualizedRoi'].includes(sortConfig.key);
+            const needsDaysHeld = sortConfig.key === 'daysHeld';
+
+            let sortCache;
+            if (needsMetrics || needsDaysHeld) {
+                sortCache = new Map();
+                for (const trade of result) {
+                    if (needsMetrics) {
+                        sortCache.set(trade.id, calculateMetrics(trade)[sortConfig.key]);
+                    } else {
+                        sortCache.set(trade.id, calculateDaysHeld(trade));
+                    }
+                }
+            }
+
             result = [...result].sort((a, b) => {
                 let aVal, bVal;
 
-                if (sortConfig.key === 'pnl' || sortConfig.key === 'roi' || sortConfig.key === 'annualizedRoi') {
-                    const aMetrics = calculateMetrics(a);
-                    const bMetrics = calculateMetrics(b);
-                    aVal = aMetrics[sortConfig.key];
-                    bVal = bMetrics[sortConfig.key];
-                } else if (sortConfig.key === 'daysHeld') {
-                    aVal = calculateDaysHeld(a);
-                    bVal = calculateDaysHeld(b);
+                if (sortCache) {
+                    aVal = sortCache.get(a.id);
+                    bVal = sortCache.get(b.id);
                 } else if (sortConfig.key === 'ticker') {
                     aVal = a.ticker.toLowerCase();
                     bVal = b.ticker.toLowerCase();
@@ -437,8 +416,7 @@ export default function App() {
                 if (!response.ok) throw new Error('Failed to save trade');
             }
 
-            await fetchTrades();
-            await fetchCapitalGainsStats();
+            await refreshAll();
             closeModal();
             // Go to first page when adding new trade
             if (!editingId) setCurrentPage(1);
@@ -454,8 +432,7 @@ export default function App() {
         try {
             const response = await fetch(`${API_URL}/trades/${id}`, { method: 'DELETE' });
             if (!response.ok) throw new Error('Failed to delete trade');
-            await fetchTrades();
-            await fetchCapitalGainsStats();
+            await refreshAll();
             showToast('Trade deleted');
         } catch (err) {
             console.error('Error deleting trade:', err);
@@ -477,8 +454,7 @@ export default function App() {
                 }),
             });
             if (!response.ok) throw new Error('Failed to close trade');
-            await fetchTrades();
-            await fetchCapitalGainsStats();
+            await refreshAll();
             showToast(`${trade.ticker} closed at $0`);
         } catch (err) {
             console.error('Error closing trade:', err);
@@ -573,8 +549,7 @@ export default function App() {
             if (!response.ok) throw new Error('Failed to import trades');
 
             const result = await response.json();
-            await fetchTrades();
-            await fetchCapitalGainsStats();
+            await refreshAll();
             showToast(`Successfully imported ${result.data.imported} trades!`);
         } catch (err) {
             console.error('Error importing CSV:', err);

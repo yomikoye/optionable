@@ -1,5 +1,25 @@
 # Changelog
 
+## v0.9.0
+
+### Data Integrity & Validation
+- **Input validation** — Server-side validation for trades and positions (types, ranges, dates)
+- **Data integrity** — CHECK constraints and ON DELETE CASCADE/SET NULL at database level
+- **Prices as INTEGER** — Store prices in cents to avoid floating point precision issues
+
+### Performance
+- **SQLite WAL mode** — Better concurrent read/write performance
+- **Batch price optimization** — Parallel price fetches with Promise.all()
+- **N+1 query fix** — Recursive CTE for chain P/L calculations in stats endpoint
+- **Sort pre-compute** — Map-based caching eliminates repeated calculations during sort
+- **Chain building optimization** — O(1) Map lookups instead of O(n) array find()
+
+### Architecture
+- **Schema versioning** — Flyway-style numbered migrations replace fragile column checks
+- **Hooks cleanup** — App.jsx now uses useTheme and useTrades hooks
+
+---
+
 ## v0.8.0
 
 - **Stock gains cleanup** — Deleting trades now properly deletes associated positions and capital gains

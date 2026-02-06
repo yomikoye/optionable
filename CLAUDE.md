@@ -4,12 +4,12 @@
 
 Wheel Strategy Tracker for Cash Secured Puts (CSPs) and Covered Calls (CCs). Self-hosted, local-first app with SQLite storage. Only external dependency is optional live stock prices via [stockprices.dev](https://stockprices.dev).
 
-**Current Version:** 0.8.0
+**Current Version:** 0.9.0
 **Docker:** `yomikoye/optionable:latest`
 
 ---
 
-## Architecture (v0.8.0)
+## Architecture (v0.9.0)
 
 ```
 src/
@@ -44,10 +44,13 @@ src/
 
 ### Database Tables
 
+All prices stored as INTEGER cents (converted at API boundary).
+
 - **trades** — ticker, type (CSP/CC), strike, quantity, delta, entryPrice, closePrice, dates, status, parentTradeId, notes
 - **positions** — ticker, shares, costBasis, acquiredDate, acquiredFromTradeId, salePrice, soldViaTradeId, capitalGainLoss
 - **price_cache** — ticker, price, change, changePercent (cached from stockprices.dev)
 - **settings** — key/value store (live_prices_enabled, confirm_expiry)
+- **schema_migrations** — version, applied_at, description (Flyway-style migration tracking)
 
 ### Key Files
 

@@ -78,9 +78,22 @@ export const TradeTable = ({
 
     // Build chains from trades - group related trades together
     const chainedTrades = useMemo(() => {
+        // Pre-compute metrics for all trades once (avoid recalculating in loops)
+        const metricsCache = new Map();
+        for (const trade of filteredAndSortedTrades) {
+            metricsCache.set(trade.id, calculateMetrics(trade));
+        }
+
+        // Build lookup Map: parentTradeId -> child trade (O(1) lookup vs O(n) find)
+        const childByParent = new Map();
+        for (const trade of filteredAndSortedTrades) {
+            if (trade.parentTradeId) {
+                childByParent.set(trade.parentTradeId, trade);
+            }
+        }
+
         // Find all chain roots (trades without parent)
         const roots = filteredAndSortedTrades.filter(t => !t.parentTradeId);
-        const tradesById = new Map(filteredAndSortedTrades.map(t => [t.id, t]));
 
         // Build chain for each root
         const chains = [];
@@ -92,19 +105,24 @@ export const TradeTable = ({
             const chain = [root];
             processedIds.add(root.id);
 
-            // Follow the chain forward
+            // Follow the chain forward using Map lookup (O(1) per step)
             let currentId = root.id;
-            let child = filteredAndSortedTrades.find(t => t.parentTradeId === currentId);
+            let child = childByParent.get(currentId);
             while (child && !processedIds.has(child.id)) {
                 chain.push(child);
                 processedIds.add(child.id);
                 currentId = child.id;
-                child = filteredAndSortedTrades.find(t => t.parentTradeId === currentId);
+                child = childByParent.get(currentId);
             }
 
-            // Calculate chain totals
-            const chainPnL = chain.reduce((sum, t) => sum + calculateMetrics(t).pnl, 0);
-            const chainCollateral = chain.reduce((sum, t) => sum + calculateMetrics(t).collateral, 0);
+            // Calculate chain totals using pre-computed metrics
+            let chainPnL = 0;
+            let chainCollateral = 0;
+            for (const t of chain) {
+                const m = metricsCache.get(t.id);
+                chainPnL += m.pnl;
+                chainCollateral += m.collateral;
+            }
             const chainRoi = chainCollateral > 0 ? (chainPnL / chainCollateral) * 100 : 0;
             const lastTrade = chain[chain.length - 1];
 
@@ -122,12 +140,13 @@ export const TradeTable = ({
         // Add any orphaned trades (shouldn't happen normally)
         for (const trade of filteredAndSortedTrades) {
             if (!processedIds.has(trade.id)) {
+                const m = metricsCache.get(trade.id);
                 chains.push({
                     id: trade.id,
                     root: trade,
                     trades: [trade],
-                    chainPnL: calculateMetrics(trade).pnl,
-                    chainRoi: calculateMetrics(trade).roi,
+                    chainPnL: m.pnl,
+                    chainRoi: m.roi,
                     isMultiTrade: false,
                     finalStatus: trade.status
                 });
