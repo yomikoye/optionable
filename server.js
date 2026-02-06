@@ -485,6 +485,60 @@ app.post('/api/trades', (req, res) => {
     }
 });
 
+// POST roll trade (atomic: close original + create new)
+app.post('/api/trades/roll', (req, res) => {
+    try {
+        const { originalTradeId, closePrice, newTrade } = req.body;
+
+        if (!originalTradeId || closePrice === undefined || !newTrade) {
+            return apiResponse.error(res, 'Missing required fields: originalTradeId, closePrice, newTrade', 400);
+        }
+
+        const original = db.prepare('SELECT * FROM trades WHERE id = ?').get(originalTradeId);
+        if (!original) {
+            return apiResponse.error(res, 'Original trade not found', 404);
+        }
+
+        const rollTransaction = db.transaction(() => {
+            // Close original trade as Rolled
+            db.prepare(`
+                UPDATE trades
+                SET closePrice = ?, closedDate = ?, status = 'Rolled', updatedAt = CURRENT_TIMESTAMP
+                WHERE id = ?
+            `).run(closePrice, newTrade.openedDate, originalTradeId);
+
+            // Create new rolled trade
+            const result = db.prepare(`
+                INSERT INTO trades (ticker, type, strike, quantity, delta, entryPrice, closePrice, openedDate, expirationDate, closedDate, status, parentTradeId, notes)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            `).run(
+                original.ticker,
+                newTrade.type || original.type,
+                newTrade.strike,
+                newTrade.quantity || original.quantity,
+                newTrade.delta || null,
+                newTrade.entryPrice,
+                newTrade.closePrice || 0,
+                newTrade.openedDate,
+                newTrade.expirationDate,
+                newTrade.closedDate || null,
+                newTrade.status || 'Open',
+                originalTradeId,
+                newTrade.notes || null
+            );
+
+            return result.lastInsertRowid;
+        });
+
+        const newTradeId = rollTransaction();
+        const createdTrade = db.prepare('SELECT * FROM trades WHERE id = ?').get(newTradeId);
+        apiResponse.created(res, createdTrade);
+    } catch (error) {
+        console.error('Error rolling trade:', error);
+        apiResponse.error(res, 'Failed to roll trade');
+    }
+});
+
 // POST bulk import trades
 app.post('/api/trades/import', (req, res) => {
     try {
@@ -495,33 +549,52 @@ app.post('/api/trades/import', (req, res) => {
         }
 
         const stmt = db.prepare(`
-            INSERT INTO trades (ticker, type, strike, quantity, delta, entryPrice, closePrice, openedDate, expirationDate, closedDate, status, parentTradeId)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO trades (ticker, type, strike, quantity, delta, entryPrice, closePrice, openedDate, expirationDate, closedDate, status, parentTradeId, notes)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `);
 
         const insertMany = db.transaction((trades) => {
             let imported = 0;
-            for (const trade of trades) {
-                try {
-                    stmt.run(
-                        trade.ticker?.toUpperCase(),
-                        trade.type,
-                        trade.strike,
-                        trade.quantity || 1,
-                        trade.delta || null,
-                        trade.entryPrice,
-                        trade.closePrice || 0,
-                        trade.openedDate,
-                        trade.expirationDate,
-                        trade.closedDate || null,
-                        trade.status || 'Open',
-                        trade.parentTradeId || null
-                    );
-                    imported++;
-                } catch (e) {
-                    console.error('Error importing trade:', e, trade);
+            const idMap = new Map(); // old ID → new ID
+
+            // Insert trades in dependency order (parents before children)
+            const remaining = [...trades];
+            let lastCount = -1;
+            while (remaining.length > 0 && remaining.length !== lastCount) {
+                lastCount = remaining.length;
+                for (let i = remaining.length - 1; i >= 0; i--) {
+                    const trade = remaining[i];
+                    const oldParentId = trade.parentTradeId ? Number(trade.parentTradeId) : null;
+
+                    // Skip if parent hasn't been inserted yet
+                    if (oldParentId && !idMap.has(oldParentId)) continue;
+
+                    try {
+                        const newParentId = oldParentId ? (idMap.get(oldParentId) || null) : null;
+                        const result = stmt.run(
+                            trade.ticker?.toUpperCase(),
+                            trade.type,
+                            trade.strike,
+                            trade.quantity || 1,
+                            trade.delta || null,
+                            trade.entryPrice,
+                            trade.closePrice || 0,
+                            trade.openedDate,
+                            trade.expirationDate,
+                            trade.closedDate || null,
+                            trade.status || 'Open',
+                            newParentId,
+                            trade.notes || null
+                        );
+                        if (trade.id) idMap.set(Number(trade.id), result.lastInsertRowid);
+                        imported++;
+                    } catch (e) {
+                        console.error('Error importing trade:', e, trade);
+                    }
+                    remaining.splice(i, 1);
                 }
             }
+
             return imported;
         });
 
@@ -955,9 +1028,9 @@ app.get('/api/prices/:ticker', async (req, res) => {
         // Try to fetch from external API
         try {
             // Try stocks endpoint first, then ETFs
-            let response = await fetch(`https://stockprices.dev/api/stocks/${ticker}`);
+            let response = await fetch(`https://stockprices.dev/api/stocks/${ticker}`, { signal: AbortSignal.timeout(5000) });
             if (!response.ok) {
-                response = await fetch(`https://stockprices.dev/api/etfs/${ticker}`);
+                response = await fetch(`https://stockprices.dev/api/etfs/${ticker}`, { signal: AbortSignal.timeout(5000) });
             }
 
             if (response.ok) {
@@ -1013,14 +1086,27 @@ app.post('/api/prices/batch', async (req, res) => {
             return apiResponse.error(res, 'No tickers provided', 400);
         }
 
+        // Check if live prices are enabled
+        const setting = db.prepare('SELECT value FROM settings WHERE key = ?').get('live_prices_enabled');
+        const livePricesEnabled = setting && setting.value === 'true';
+
         const results = {};
 
         for (const ticker of tickers.slice(0, 20)) { // Limit to 20
             const t = ticker.toUpperCase();
             try {
-                let response = await fetch(`https://stockprices.dev/api/stocks/${t}`);
+                if (!livePricesEnabled) {
+                    // Only return cached prices when live is disabled
+                    const cached = db.prepare('SELECT * FROM price_cache WHERE ticker = ?').get(t);
+                    if (cached) {
+                        results[t] = { ...cached, live: false };
+                    }
+                    continue;
+                }
+
+                let response = await fetch(`https://stockprices.dev/api/stocks/${t}`, { signal: AbortSignal.timeout(5000) });
                 if (!response.ok) {
-                    response = await fetch(`https://stockprices.dev/api/etfs/${t}`);
+                    response = await fetch(`https://stockprices.dev/api/etfs/${t}`, { signal: AbortSignal.timeout(5000) });
                 }
 
                 if (response.ok) {

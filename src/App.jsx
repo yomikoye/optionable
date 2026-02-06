@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { X, RefreshCw } from 'lucide-react';
+import Papa from 'papaparse';
 
 // Shared utilities
 import { API_URL, TRADES_PER_PAGE, APP_VERSION } from './utils/constants';
@@ -410,32 +411,31 @@ export default function App() {
         };
 
         try {
-            // If rolling, first update the original trade to 'Rolled' status
+            // If rolling, use atomic roll endpoint
             if (isRolling && rollFromTrade) {
-                const updateOriginal = await fetch(`${API_URL}/trades/${rollFromTrade.id}`, {
-                    method: 'PUT',
+                const response = await fetch(`${API_URL}/trades/roll`, {
+                    method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        ...rollFromTrade,
+                        originalTradeId: rollFromTrade.id,
                         closePrice: Number(rollClosePrice),
-                        closedDate: formData.openedDate,
-                        status: 'Rolled',
+                        newTrade: tradeData,
                     }),
                 });
 
-                if (!updateOriginal.ok) throw new Error('Failed to update original trade');
+                if (!response.ok) throw new Error('Failed to roll trade');
+            } else {
+                const url = editingId ? `${API_URL}/trades/${editingId}` : `${API_URL}/trades`;
+                const method = editingId ? 'PUT' : 'POST';
+
+                const response = await fetch(url, {
+                    method,
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(tradeData),
+                });
+
+                if (!response.ok) throw new Error('Failed to save trade');
             }
-
-            const url = editingId ? `${API_URL}/trades/${editingId}` : `${API_URL}/trades`;
-            const method = editingId ? 'PUT' : 'POST';
-
-            const response = await fetch(url, {
-                method,
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(tradeData),
-            });
-
-            if (!response.ok) throw new Error('Failed to save trade');
 
             await fetchTrades();
             await fetchCapitalGainsStats();
@@ -493,7 +493,7 @@ export default function App() {
             return;
         }
 
-        const headers = ['id', 'ticker', 'type', 'strike', 'quantity', 'delta', 'entryPrice', 'closePrice', 'openedDate', 'expirationDate', 'closedDate', 'status', 'parentTradeId'];
+        const headers = ['id', 'ticker', 'type', 'strike', 'quantity', 'delta', 'entryPrice', 'closePrice', 'openedDate', 'expirationDate', 'closedDate', 'status', 'parentTradeId', 'notes'];
 
         const csvContent = [
             headers.join(','),
@@ -525,46 +525,43 @@ export default function App() {
 
         try {
             const text = await file.text();
-            const lines = text.split('\n').filter(line => line.trim());
 
-            if (lines.length < 2) {
+            const parsed = Papa.parse(text, {
+                header: true,
+                skipEmptyLines: true,
+                transformHeader: (h) => h.trim(),
+            });
+
+            if (parsed.data.length === 0) {
                 setError('CSV file is empty or invalid');
+                event.target.value = '';
                 return;
             }
 
-            const headers = lines[0].split(',').map(h => h.trim());
+            const headers = parsed.meta.fields;
             const requiredHeaders = ['ticker', 'type', 'strike', 'entryPrice', 'openedDate', 'expirationDate', 'status'];
             const missingHeaders = requiredHeaders.filter(h => !headers.includes(h));
 
             if (missingHeaders.length > 0) {
                 setError(`Missing required columns: ${missingHeaders.join(', ')}`);
+                event.target.value = '';
                 return;
             }
 
-            const tradesToImport = [];
-            for (let i = 1; i < lines.length; i++) {
-                const values = lines[i].split(',').map(v => v.trim().replace(/^"|"$/g, ''));
-                const trade = {};
-                headers.forEach((header, index) => {
-                    trade[header] = values[index] || null;
-                });
-
-                // Validate and convert types
-                tradesToImport.push({
-                    ticker: trade.ticker,
-                    type: trade.type,
-                    strike: Number(trade.strike) || 0,
-                    quantity: Number(trade.quantity) || 1,
-                    delta: trade.delta ? Number(trade.delta) : null,
-                    entryPrice: Number(trade.entryPrice) || 0,
-                    closePrice: Number(trade.closePrice) || 0,
-                    openedDate: trade.openedDate,
-                    expirationDate: trade.expirationDate,
-                    closedDate: trade.closedDate || null,
-                    status: trade.status || 'Open',
-                    parentTradeId: trade.parentTradeId ? Number(trade.parentTradeId) : null,
-                });
-            }
+            const tradesToImport = parsed.data.map(trade => ({
+                ticker: trade.ticker,
+                type: trade.type,
+                strike: Number(trade.strike) || 0,
+                quantity: Number(trade.quantity) || 1,
+                delta: trade.delta ? Number(trade.delta) : null,
+                entryPrice: Number(trade.entryPrice) || 0,
+                closePrice: Number(trade.closePrice) || 0,
+                openedDate: trade.openedDate,
+                expirationDate: trade.expirationDate,
+                closedDate: trade.closedDate || null,
+                status: trade.status || 'Open',
+                parentTradeId: trade.parentTradeId ? Number(trade.parentTradeId) : null,
+            }));
 
             // Import trades via API
             const response = await fetch(`${API_URL}/trades/import`, {
@@ -578,7 +575,7 @@ export default function App() {
             const result = await response.json();
             await fetchTrades();
             await fetchCapitalGainsStats();
-            alert(`Successfully imported ${result.data.imported} trades!`);
+            showToast(`Successfully imported ${result.data.imported} trades!`);
         } catch (err) {
             console.error('Error importing CSV:', err);
             setError('Failed to import CSV. Please check the file format.');
@@ -860,6 +857,7 @@ export default function App() {
                     onDelete={deleteTrade}
                     onOpenCC={openCoveredCall}
                     confirmExpireEnabled={appSettings.confirm_expire_enabled !== 'false'}
+                    livePricesEnabled={appSettings.live_prices_enabled === 'true'}
                 />
 
                 {/* Summary Cards */}

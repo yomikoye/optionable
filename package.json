@@ -14,7 +14,8 @@
     "dependencies": {
         "better-sqlite3": "^11.6.0",
         "cors": "^2.8.5",
-        "express": "^4.21.1"
+        "express": "^4.21.1",
+        "papaparse": "^5.5.3"
     },
     "devDependencies": {
         "@vitejs/plugin-react": "^4.3.3",
@@ -29,4 +30,3 @@
         "vite": "^6.0.1"
     }
 }
-

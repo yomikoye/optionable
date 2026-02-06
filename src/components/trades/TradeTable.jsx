@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
     Calendar,
     ChevronLeft,
@@ -39,10 +39,27 @@ export const TradeTable = ({
     onEdit,
     onDelete,
     onOpenCC,
-    confirmExpireEnabled = true
+    confirmExpireEnabled = true,
+    livePricesEnabled = false
 }) => {
+    const API_URL = '/api';
     const [expandedChains, setExpandedChains] = useState(new Set());
     const [expireConfirm, setExpireConfirm] = useState(null); // trade to confirm expire
+    const [prices, setPrices] = useState({});
+
+    useEffect(() => {
+        if (!livePricesEnabled) { setPrices({}); return; }
+        const tickers = [...new Set(trades.map(t => t.ticker.toUpperCase()))];
+        if (tickers.length === 0) return;
+        fetch(`${API_URL}/prices/batch`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ tickers })
+        })
+            .then(res => res.json())
+            .then(data => { if (data.success) setPrices(data.data); })
+            .catch(() => {});
+    }, [livePricesEnabled, trades]);
 
     const handleExpireClick = (trade) => {
         if (confirmExpireEnabled) {
@@ -87,6 +104,8 @@ export const TradeTable = ({
 
             // Calculate chain totals
             const chainPnL = chain.reduce((sum, t) => sum + calculateMetrics(t).pnl, 0);
+            const chainCollateral = chain.reduce((sum, t) => sum + calculateMetrics(t).collateral, 0);
+            const chainRoi = chainCollateral > 0 ? (chainPnL / chainCollateral) * 100 : 0;
             const lastTrade = chain[chain.length - 1];
 
             chains.push({
@@ -94,6 +113,7 @@ export const TradeTable = ({
                 root,
                 trades: chain,
                 chainPnL,
+                chainRoi,
                 isMultiTrade: chain.length > 1,
                 finalStatus: lastTrade.status
             });
@@ -107,6 +127,7 @@ export const TradeTable = ({
                     root: trade,
                     trades: [trade],
                     chainPnL: calculateMetrics(trade).pnl,
+                    chainRoi: calculateMetrics(trade).roi,
                     isMultiTrade: false,
                     finalStatus: trade.status
                 });
@@ -211,6 +232,7 @@ export const TradeTable = ({
                             <th className="px-3 py-2 font-semibold cursor-pointer hover:text-slate-700 dark:hover:text-slate-200" onClick={() => handleSort('strike')}>
                                 <span className="inline-flex items-center gap-1">Strike {getSortIcon('strike')}</span>
                             </th>
+                            {livePricesEnabled && <th className="px-3 py-2 font-semibold">Price</th>}
                             <th className="px-3 py-2 font-semibold text-center">Qty</th>
                             <th className="px-3 py-2 font-semibold text-center">Delta</th>
                             <th className="px-3 py-2 font-semibold cursor-pointer hover:text-slate-700 dark:hover:text-slate-200" onClick={() => handleSort('openedDate')}>
@@ -233,7 +255,7 @@ export const TradeTable = ({
                     <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
                         {paginatedChains.length === 0 ? (
                             <tr>
-                                <td colSpan="12" className="px-4 py-12 text-center text-sm text-slate-400">
+                                <td colSpan={livePricesEnabled ? 13 : 12} className="px-4 py-12 text-center text-sm text-slate-400">
                                     {trades.length === 0 ? "No trades yet. Click \"New Trade\" to start your wheel." : "No trades match the current filter."}
                                 </td>
                             </tr>
@@ -241,8 +263,8 @@ export const TradeTable = ({
                             paginatedChains.map((chain) => {
                                 const isExpanded = expandedChains.has(chain.id);
                                 const rootTrade = chain.root;
-                                const rootMetrics = calculateMetrics(rootTrade);
-                                const rootDte = calculateDTE(rootTrade.expirationDate, rootTrade.status);
+                                const lastTrade = chain.trades[chain.trades.length - 1];
+                                const chainDte = calculateDTE(lastTrade.expirationDate, lastTrade.status);
 
                                 return (
                                     <React.Fragment key={chain.id}>
@@ -282,6 +304,20 @@ export const TradeTable = ({
                                                 </span>
                                             </td>
                                             <td className="px-3 py-2 font-mono text-sm text-slate-600 dark:text-slate-300">${rootTrade.strike}</td>
+                                            {livePricesEnabled && (() => {
+                                                const price = prices[rootTrade.ticker.toUpperCase()]?.price;
+                                                return (
+                                                    <td className={`px-3 py-2 font-mono text-sm font-medium ${
+                                                        price != null
+                                                            ? price >= rootTrade.strike
+                                                                ? 'text-emerald-600 dark:text-emerald-400'
+                                                                : 'text-red-500 dark:text-red-400'
+                                                            : 'text-slate-400'
+                                                    }`}>
+                                                        {price != null ? `$${price.toFixed(2)}` : '—'}
+                                                    </td>
+                                                );
+                                            })()}
                                             <td className="px-3 py-2 text-center font-mono text-sm text-slate-600 dark:text-slate-300">{rootTrade.quantity}</td>
                                             <td className="px-3 py-2 text-center font-mono text-sm text-slate-500 dark:text-slate-400">
                                                 {rootTrade.delta ? rootTrade.delta.toFixed(2) : '—'}
@@ -293,12 +329,12 @@ export const TradeTable = ({
                                                 {formatDateShort(rootTrade.expirationDate)}
                                             </td>
                                             <td className="px-3 py-2 text-center">
-                                                {rootDte !== null ? (
-                                                    <span className={`font-mono text-sm font-medium ${rootDte <= 3 ? 'text-red-600 dark:text-red-400' :
-                                                        rootDte <= 7 ? 'text-orange-600 dark:text-orange-400' :
+                                                {chainDte !== null ? (
+                                                    <span className={`font-mono text-sm font-medium ${chainDte <= 3 ? 'text-red-600 dark:text-red-400' :
+                                                        chainDte <= 7 ? 'text-orange-600 dark:text-orange-400' :
                                                             'text-slate-600 dark:text-slate-300'
                                                     }`}>
-                                                        {rootDte}d
+                                                        {chainDte}d
                                                     </span>
                                                 ) : (
                                                     <span className="text-slate-300 dark:text-slate-600 text-sm">—</span>
@@ -310,8 +346,8 @@ export const TradeTable = ({
                                                     <span className="block text-[10px] text-slate-400 font-normal">chain total</span>
                                                 )}
                                             </td>
-                                            <td className={`px-3 py-2 text-right font-mono text-sm ${rootMetrics.roi >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-500 dark:text-red-400'}`}>
-                                                {formatPercent(rootMetrics.roi)}
+                                            <td className={`px-3 py-2 text-right font-mono text-sm ${chain.chainRoi >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-500 dark:text-red-400'}`}>
+                                                {formatPercent(chain.chainRoi)}
                                             </td>
                                             <td className="px-3 py-2 text-center">
                                                 <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
@@ -403,6 +439,20 @@ export const TradeTable = ({
                                                         </span>
                                                     </td>
                                                     <td className="px-3 py-2 font-mono text-sm text-slate-500 dark:text-slate-400">${trade.strike}</td>
+                                                    {livePricesEnabled && (() => {
+                                                        const price = prices[trade.ticker.toUpperCase()]?.price;
+                                                        return (
+                                                            <td className={`px-3 py-2 font-mono text-sm font-medium ${
+                                                                price != null
+                                                                    ? price >= trade.strike
+                                                                        ? 'text-emerald-600 dark:text-emerald-400'
+                                                                        : 'text-red-500 dark:text-red-400'
+                                                                    : 'text-slate-400'
+                                                            }`}>
+                                                                {price != null ? `$${price.toFixed(2)}` : '—'}
+                                                            </td>
+                                                        );
+                                                    })()}
                                                     <td className="px-3 py-2 text-center font-mono text-sm text-slate-500 dark:text-slate-400">{trade.quantity}</td>
                                                     <td className="px-3 py-2 text-center font-mono text-sm text-slate-400 dark:text-slate-500">
                                                         {trade.delta ? trade.delta.toFixed(2) : '—'}
