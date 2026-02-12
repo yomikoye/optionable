@@ -4,41 +4,73 @@
 
 Wheel Strategy Tracker for Cash Secured Puts (CSPs) and Covered Calls (CCs). Self-hosted, local-first app with SQLite storage. Only external dependency is optional live stock prices via [stockprices.dev](https://stockprices.dev).
 
-**Current Version:** 0.9.0
+**Current Version:** 0.10.0
 **Docker:** `yomikoye/optionable:latest`
 
 ---
 
-## Architecture (v0.9.0)
+## Architecture (v0.10.0)
 
+### Backend
+```
+server.js                        # Thin entry point (~10 lines)
+server/
+├── index.js                     # createApp() + startServer()
+├── db/
+│   ├── connection.js            # DB singleton, WAL, pragmas
+│   ├── migrations.js            # Schema versioning + 7 migrations
+│   └── seed.js                  # Demo data + cost basis fixup
+├── middleware/
+│   └── index.js                 # cors, json parser, request ID
+├── routes/
+│   ├── health.js                # GET /api/health
+│   ├── trades.js                # /api/trades (CRUD + roll + import)
+│   ├── stats.js                 # GET /api/stats (recursive CTE)
+│   ├── positions.js             # /api/positions (CRUD + summary)
+│   ├── prices.js                # /api/prices (single + batch)
+│   └── settings.js              # /api/settings (GET + PUT)
+└── utils/
+    ├── conversions.js           # toCents, toDollars, tradeToApi, positionToApi
+    ├── response.js              # apiResponse helper
+    └── validation.js            # validateTrade, validatePosition
+```
+
+### Frontend
 ```
 src/
-├── App.jsx                     # Main app (~950 lines, includes TradeModal)
+├── App.jsx                      # Orchestration (~200 lines)
 ├── components/
 │   ├── ui/
-│   │   ├── Toast.jsx           # Toast notifications
-│   │   └── WelcomeModal.jsx    # First-time user onboarding
-│   ├── layout/Header.jsx       # App header with actions
+│   │   ├── Toast.jsx            # Toast notifications
+│   │   └── WelcomeModal.jsx     # First-time user onboarding
+│   ├── layout/Header.jsx        # App header with actions
 │   ├── dashboard/
-│   │   ├── Dashboard.jsx       # KPI cards (6 metrics)
-│   │   └── SummaryCards.jsx    # Monthly P/L, Ticker P/L, Tips
-│   ├── chart/PnLChart.jsx      # Cumulative P/L chart
-│   ├── trades/TradeTable.jsx   # Trade log with chain grouping
+│   │   ├── Dashboard.jsx        # KPI cards (6 metrics)
+│   │   └── SummaryCards.jsx     # Monthly P/L, Ticker P/L, Tips
+│   ├── chart/PnLChart.jsx       # Cumulative P/L chart
+│   ├── trades/
+│   │   ├── TradeTable.jsx       # Trade log with chain grouping
+│   │   └── TradeModal.jsx       # Trade create/edit/roll modal
 │   ├── positions/PositionsTable.jsx  # Stock positions tracking
-│   └── settings/SettingsModal.jsx    # App settings (live prices, confirm expiry)
+│   └── settings/SettingsModal.jsx    # App settings
 ├── hooks/
-│   ├── useToast.js             # Toast notification hook
-│   ├── useTheme.js             # Dark mode toggle
-│   └── useTrades.js            # Trade CRUD operations
-├── services/api.js             # API service layer
+│   ├── useToast.js              # Toast notification hook
+│   ├── useTheme.js              # Dark mode toggle
+│   ├── useTrades.js             # Trade data fetching
+│   ├── useTradeForm.js          # Trade form state + CRUD handlers
+│   ├── useStats.js              # Stats, chart data, chain info
+│   ├── useFilterSort.js         # Table filtering, sorting, pagination
+│   ├── useCSV.js                # CSV import/export
+│   └── useKeyboardShortcuts.js  # Keyboard shortcut handler
+├── services/api.js              # API service layer (trades, stats, settings, health)
 ├── utils/
-│   ├── constants.js            # API_URL, TRADES_PER_PAGE (5)
-│   ├── formatters.js           # formatCurrency, formatDate, etc.
-│   └── calculations.js         # calculateMetrics, calculateDTE
-└── index.css                   # Tailwind styles + JetBrains Mono
+│   ├── constants.js             # API_URL, TRADES_PER_PAGE (5)
+│   ├── formatters.js            # formatCurrency, formatDate, etc.
+│   └── calculations.js          # calculateMetrics, calculateDTE
+└── index.css                    # Tailwind styles + JetBrains Mono
 ```
 
-**Backend:** Express + better-sqlite3 (single `server.js`)
+**Backend:** Express + better-sqlite3 (modular `server/` directory)
 **Frontend:** React 18, Vite, Tailwind CSS, Recharts, Lucide Icons
 **API:** `/api/trades`, `/api/positions`, `/api/stats`, `/api/settings`, `/api/prices`, `/api/health`
 
@@ -56,10 +88,15 @@ All prices stored as INTEGER cents (converted at API boundary).
 
 | File | Purpose |
 |------|---------|
-| `server.js` | Express API, SQLite database, all endpoints, seed data |
-| `src/App.jsx` | Main React app, state management, TradeModal |
-| `src/components/trades/TradeTable.jsx` | Trade log with chain grouping |
-| `src/components/positions/PositionsTable.jsx` | Stock positions tracking |
+| `server.js` | Thin entry point (imports `server/index.js`) |
+| `server/index.js` | App creation, startup orchestration |
+| `server/db/connection.js` | Database singleton + WAL config |
+| `server/db/migrations.js` | Schema versioning (7 migrations) |
+| `server/routes/trades.js` | Trade CRUD + roll + import endpoints |
+| `src/App.jsx` | React orchestration (~200 lines) |
+| `src/hooks/useTradeForm.js` | Trade form state + CRUD handlers |
+| `src/hooks/useStats.js` | Stats computation, chart data |
+| `src/components/trades/TradeModal.jsx` | Trade create/edit/roll modal |
 | `src/utils/calculations.js` | P/L calculations, metrics |
 | `Dockerfile` | Multi-stage build for production |
 | `docker-compose.yml` | Docker deployment config |
@@ -90,7 +127,7 @@ npm run build        # Build for production
 1. **Ask user:** "Ready to bump version and release?" (they may not be done yet)
 2. **Bump version** (after user confirms, on `develop`):
    - `package.json` → update `"version"`
-   - `server.js` → update fallback version in `/api/health`
+   - `server/routes/health.js` → update fallback version in `/api/health`
    - `src/utils/constants.js` → update `APP_VERSION`
    - `README.md` → update version badge and docker example
    - `CLAUDE.md` → update "Current Version"

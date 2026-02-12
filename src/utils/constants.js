@@ -2,7 +2,7 @@
 export const API_URL = '/api';
 
 // App Version
-export const APP_VERSION = '0.9.0';
+export const APP_VERSION = '0.10.0';
 
 // Pagination
 export const TRADES_PER_PAGE = 5;

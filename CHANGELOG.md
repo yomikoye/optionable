@@ -1,5 +1,29 @@
 # Changelog
 
+## v0.10.0
+
+### Architecture
+- **Modular backend** — Split `server.js` (1607 lines) into 13 focused modules under `server/` (db, middleware, routes, utils)
+- **Modular frontend** — Split `App.jsx` (1085 lines) into 6 hooks + TradeModal component (~200 lines remaining)
+- **Thin entry point** — `server.js` is now a ~10 line wrapper that imports `server/index.js`
+- **Hook extraction** — `useTradeForm`, `useStats`, `useFilterSort`, `useCSV`, `useKeyboardShortcuts` extracted from App.jsx
+- **TradeModal extraction** — Trade create/edit/roll modal extracted to `src/components/trades/TradeModal.jsx`
+- **API service layer** — Added `tradesApi.roll()` and `settingsApi` to `src/services/api.js`
+
+### Security
+- **Security headers** — X-Content-Type-Options, X-Frame-Options, X-XSS-Protection, Referrer-Policy
+- **CSP in production** — Content-Security-Policy header restricts resource loading
+- **CORS hardening** — Restricted to same-origin in production
+- **Info disclosure fix** — Health endpoint no longer leaks DB error details
+- **Parameterized seed queries** — Replaced `db.exec()` template literals with `db.prepare().run()` in seed data
+- **X-Powered-By disabled** — Express fingerprint header removed
+
+### Bug Fixes
+- **CSV import chain linking** — Import now preserves `id` field so parentTradeId chain links (rolls, CSP→CC) survive round-trip export/import
+- **CSV import notes** — Notes field now included in import mapping (was exported but dropped on import)
+
+---
+
 ## v0.9.0
 
 ### Data Integrity & Validation

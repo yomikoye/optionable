@@ -1,11 +1,11 @@
 {
     "name": "optionable",
-    "version": "0.9.0",
+    "version": "0.10.0",
     "description": "Wheel Strategy Tracker for CSPs and Covered Calls",
     "type": "module",
     "scripts": {
         "dev": "concurrently \"npm run dev:server\" \"npm run dev:client\"",
-        "dev:server": "node --watch server.js",
+        "dev:server": "node --watch-path=. --watch-path=server server.js",
         "dev:client": "vite",
         "build": "vite build",
         "start": "NODE_ENV=production node server.js",

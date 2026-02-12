@@ -67,6 +67,14 @@ export const tradesApi = {
             method: 'POST',
             body: JSON.stringify({ trades })
         });
+    },
+
+    // Roll trade (atomic close + create new)
+    roll: async (originalTradeId, closePrice, newTrade) => {
+        return request('/trades/roll', {
+            method: 'POST',
+            body: JSON.stringify({ originalTradeId, closePrice, newTrade })
+        });
     }
 };
 
@@ -74,6 +82,19 @@ export const tradesApi = {
 export const statsApi = {
     get: async () => {
         return request('/stats');
+    }
+};
+
+// Settings API
+export const settingsApi = {
+    getAll: async () => {
+        return request('/settings');
+    },
+    update: async (key, value) => {
+        return request(`/settings/${key}`, {
+            method: 'PUT',
+            body: JSON.stringify({ value })
+        });
     }
 };
 

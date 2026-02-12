@@ -35,8 +35,9 @@ RUN apk del python3 make g++
 # Copy built frontend from builder stage
 COPY --from=builder /app/dist ./dist
 
-# Copy server file
+# Copy server files
 COPY server.js ./
+COPY server/ ./server/
 
 # Create data directory
 RUN mkdir -p /data

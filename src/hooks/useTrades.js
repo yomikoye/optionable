@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { tradesApi } from '../services/api';
 
-export const useTrades = (onRefresh) => {
+export const useTrades = () => {
     const [trades, setTrades] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
@@ -20,47 +20,15 @@ export const useTrades = (onRefresh) => {
         }
     }, []);
 
-    // Refresh trades and call optional callback (e.g., for refreshing stats)
-    const refreshAll = useCallback(async () => {
-        await fetchTrades();
-        if (onRefresh) await onRefresh();
-    }, [fetchTrades, onRefresh]);
-
     useEffect(() => {
         fetchTrades();
     }, [fetchTrades]);
-
-    const createTrade = async (tradeData) => {
-        await tradesApi.create(tradeData);
-        await refreshAll();
-    };
-
-    const updateTrade = async (id, tradeData) => {
-        await tradesApi.update(id, tradeData);
-        await refreshAll();
-    };
-
-    const deleteTrade = async (id) => {
-        await tradesApi.delete(id);
-        await refreshAll();
-    };
-
-    const importTrades = async (tradesToImport) => {
-        const response = await tradesApi.import(tradesToImport);
-        await refreshAll();
-        return response.data.imported;
-    };
 
     return {
         trades,
         loading,
         error,
         setError,
-        fetchTrades,
-        refreshAll,
-        createTrade,
-        updateTrade,
-        deleteTrade,
-        importTrades
+        fetchTrades
     };
 };

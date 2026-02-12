@@ -2,7 +2,7 @@
 
 A self-hosted wheel strategy tracker for Cash Secured Puts (CSPs) and Covered Calls (CCs).
 
-![Version](https://img.shields.io/badge/version-0.9.0-blue)
+![Version](https://img.shields.io/badge/version-0.10.0-blue)
 ![Docker](https://img.shields.io/badge/docker-yomikoye%2Foptionable-green)
 ![Platforms](https://img.shields.io/badge/platforms-amd64%20%7C%20arm64-lightgrey)
 
@@ -86,22 +86,44 @@ All responses use consistent format:
 ## Project Structure
 
 ```
+server.js                          # Thin entry point
+server/
+├── index.js                       # createApp() + startServer()
+├── db/
+│   ├── connection.js              # DB singleton, WAL, pragmas
+│   ├── migrations.js              # Schema versioning (7 migrations)
+│   └── seed.js                    # Demo data + cost basis fixup
+├── middleware/index.js            # CORS, JSON parser, security headers
+├── routes/
+│   ├── health.js                  # GET /api/health
+│   ├── trades.js                  # /api/trades (CRUD + roll + import)
+│   ├── stats.js                   # GET /api/stats (recursive CTE)
+│   ├── positions.js               # /api/positions (CRUD + summary)
+│   ├── prices.js                  # /api/prices (single + batch)
+│   └── settings.js                # /api/settings (GET + PUT)
+└── utils/
+    ├── conversions.js             # toCents, toDollars, tradeToApi, positionToApi
+    ├── response.js                # apiResponse helper
+    └── validation.js              # validateTrade, validatePosition
+
 src/
-├── App.jsx                    # Main app, state management, TradeModal
+├── App.jsx                        # Orchestration (~200 lines)
 ├── components/
-│   ├── ui/
-│   │   ├── Toast.jsx          # Notifications
-│   │   └── WelcomeModal.jsx   # First-time user guide
-│   ├── layout/Header.jsx      # App header
-│   ├── dashboard/
-│   │   ├── Dashboard.jsx      # KPI cards
-│   │   └── SummaryCards.jsx   # Monthly/ticker stats
-│   ├── chart/PnLChart.jsx     # P/L visualization
-│   ├── trades/TradeTable.jsx  # Trade log with chains
-│   ├── positions/PositionsTable.jsx  # Stock positions
-│   └── settings/SettingsModal.jsx    # App settings
-├── utils/                     # formatters, calculations, constants
-└── index.css                  # Tailwind styles
+│   ├── ui/                        # Toast, WelcomeModal
+│   ├── layout/Header.jsx          # App header
+│   ├── dashboard/                 # Dashboard, SummaryCards
+│   ├── chart/PnLChart.jsx         # P/L visualization
+│   ├── trades/
+│   │   ├── TradeTable.jsx         # Trade log with chains
+│   │   └── TradeModal.jsx         # Trade create/edit/roll modal
+│   ├── positions/PositionsTable.jsx
+│   └── settings/SettingsModal.jsx
+├── hooks/                         # useTheme, useTrades, useTradeForm,
+│                                  # useStats, useFilterSort, useCSV,
+│                                  # useKeyboardShortcuts, useToast
+├── services/api.js                # API service layer
+├── utils/                         # formatters, calculations, constants
+└── index.css                      # Tailwind styles
 ```
 
 ## Tech Stack
@@ -115,7 +137,7 @@ src/
 ```bash
 # Multi-platform build and push
 docker buildx build --platform linux/amd64,linux/arm64 \
-  -t yomikoye/optionable:0.9.0 \
+  -t yomikoye/optionable:0.10.0 \
   -t yomikoye/optionable:latest \
   --push .
 ```

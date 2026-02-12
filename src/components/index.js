@@ -14,6 +14,7 @@ export { PnLChart } from './chart/PnLChart';
 
 // Trade Components
 export { TradeTable } from './trades/TradeTable';
+export { TradeModal } from './trades/TradeModal';
 
 // Position Components
 export { PositionsTable } from './positions/PositionsTable';
