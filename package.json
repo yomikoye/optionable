@@ -1,6 +1,6 @@
 {
     "name": "optionable",
-    "version": "0.10.0",
+    "version": "0.11.0",
     "description": "Wheel Strategy Tracker for CSPs and Covered Calls",
     "type": "module",
     "scripts": {

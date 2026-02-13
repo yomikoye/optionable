@@ -1,5 +1,47 @@
 # Changelog
 
+## v0.11.0
+
+### Multi-Account Support
+- **Accounts CRUD** — Create, rename, and delete brokerage accounts
+- **Account filtering** — All trades, positions, stats, and portfolio data filter by selected account
+- **Account selector** — Dropdown in header to switch accounts or view "All Accounts"
+- **Account management** — Create/rename/delete accounts in Settings
+- **DB migration v8** — `accounts` table + `accountId` column on trades and positions with backfill to default account
+
+### Portfolio Mode
+- **Portfolio toggle** — Enable in Settings to show Options/Portfolio tab switcher
+- **Fund journal** — Track deposits, withdrawals, dividends, interest, and fees with full CRUD
+- **Manual stock tracking** — Buy/sell stocks with cost basis, P/L calculation, and notes
+- **Portfolio dashboard** — KPI cards: Deposited, Total P/L, Rate of Return, Options P/L, Stock Gains, Income
+- **KPI subtexts** — Each card clarifies data source (e.g. "From closed positions", "X closed trades")
+- **Monthly P/L chart** — Stacked bar chart breaking down returns by source (options, stocks, income)
+- **Income sources chart** — Donut chart showing income breakdown by category
+- **Context-aware header** — "New Trade" button becomes "Buy Stock" on Portfolio tab
+- **DB migrations v9-v10** — `fund_transactions` and `stocks` tables
+
+### UI Improvements
+- **StocksTable redesign** — Ticker aggregation with expandable lots, TradeTable-style header with filter tabs, labeled action buttons (Sell/Edit/Delete)
+- **StockModal redesign** — Matches TradeModal style: backdrop blur, uppercase labels, sell context box with P/L preview, total cost display
+- **Dark mode in Settings** — Moved from header toggle into Settings modal
+- **Help on startup toggle** — New setting to control whether welcome guide shows on app launch
+- **Welcome modal update** — 4-step wheel strategy walkthrough, updated keyboard shortcuts, portfolio mode mention
+- **Settings button restyled** — Matches Export/Import button style (icon + text label)
+
+### CSV Import/Export
+- **Multi-section format** — Export includes `[TRADES]`, `[FUND_TRANSACTIONS]`, and `[STOCKS]` sections
+- **Backward compatible** — Old single-section CSVs still import as trades-only
+- **Custom CSV parser** — Replaced PapaParse dependency with built-in parser
+
+### Bug Fixes
+- **Portfolio cash balance** — Fixed calculation to only include fund transactions (removed options P/L and stock gains from cash)
+- **Options P/L** — Now only counts realized trades (excludes Open trades where closePrice=0)
+- **Income sources chart** — Fixed 10000% display bug caused by Recharts `percent` prop collision
+- **Stock edit modal** — Fixed form not pre-filling when editing (useEffect reset instead of stale useState initializer)
+- **Header cleanup** — Removed orphaned Positions button reference
+
+---
+
 ## v0.10.0
 
 ### Architecture
