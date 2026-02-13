@@ -167,6 +167,13 @@ npm run build        # Build for production
      --push .
    ```
 8. Push to GitHub
+9. **Create GitHub release** using `gh` CLI:
+   ```bash
+   gh release create vX.Y.Z --title "vX.Y.Z" --latest=true --notes "release notes here"
+   ```
+   - Use the CHANGELOG.md entry for the version as the release notes body
+   - Include a Docker pull command at the bottom of the notes
+   - Only the newest release should have `--latest=true`
 
 ---
 
