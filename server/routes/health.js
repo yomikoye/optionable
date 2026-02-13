@@ -10,7 +10,7 @@ router.get('/', (req, res) => {
         apiResponse.success(res, {
             status: 'healthy',
             database: { connected: true, tradeCount: dbCheck.count },
-            version: process.env.npm_package_version || '0.11.0'
+            version: process.env.npm_package_version || '0.11.1'
         });
     } catch (error) {
         console.error('Health check failed:', error);

@@ -17,7 +17,7 @@ const typeColors = {
     fee: 'bg-slate-100 text-slate-700 dark:bg-slate-700 dark:text-slate-300',
 };
 
-export const FundJournal = ({ transactions, onCreate, onUpdate, onDelete, showToast, selectedAccountId }) => {
+export const FundJournal = ({ transactions, onCreate, onUpdate, onDelete, showToast, selectedAccountId, accounts }) => {
     const [showModal, setShowModal] = useState(false);
     const [editingTransaction, setEditingTransaction] = useState(null);
 
@@ -58,9 +58,8 @@ export const FundJournal = ({ transactions, onCreate, onUpdate, onDelete, showTo
                 <h3 className="text-lg font-semibold text-slate-900 dark:text-white">Fund Journal</h3>
                 <button
                     onClick={() => { setEditingTransaction(null); setShowModal(true); }}
-                    disabled={!selectedAccountId}
-                    className="flex items-center gap-1 px-3 py-1.5 text-sm bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-300 dark:disabled:bg-slate-600 text-white rounded-lg font-medium transition-colors"
-                    title={!selectedAccountId ? 'Select an account first' : 'Add transaction'}
+                    className="flex items-center gap-1 px-3 py-1.5 text-sm bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-medium transition-colors"
+                    title="Add transaction"
                 >
                     <Plus className="w-4 h-4" />
                     Add
@@ -126,6 +125,8 @@ export const FundJournal = ({ transactions, onCreate, onUpdate, onDelete, showTo
                 onClose={() => { setShowModal(false); setEditingTransaction(null); }}
                 onSave={handleSave}
                 editingTransaction={editingTransaction}
+                accounts={accounts}
+                selectedAccountId={selectedAccountId}
             />
         </div>
     );

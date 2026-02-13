@@ -13,9 +13,15 @@ export const TradeModal = ({
     setRollClosePrice,
     handleInputChange,
     closeModal,
-    saveTrade
+    saveTrade,
+    accounts,
+    selectedAccountId,
+    modalAccountId,
+    setModalAccountId
 }) => {
     if (!isModalOpen) return null;
+
+    const needsAccountPicker = !selectedAccountId && !editingId && !isRolling;
 
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm overflow-y-auto">
@@ -38,6 +44,24 @@ export const TradeModal = ({
                 </div>
 
                 <form onSubmit={saveTrade} className="p-6 space-y-4">
+
+                    {/* Account Picker (only when creating new trade with no account selected) */}
+                    {needsAccountPicker && (
+                        <div>
+                            <label className="block text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase mb-1">Account *</label>
+                            <select
+                                value={modalAccountId || ''}
+                                onChange={(e) => setModalAccountId(e.target.value ? Number(e.target.value) : null)}
+                                className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 bg-white dark:bg-slate-700 text-slate-900 dark:text-white"
+                                required
+                            >
+                                <option value="">Select account...</option>
+                                {(accounts || []).map(a => (
+                                    <option key={a.id} value={a.id}>{a.name}</option>
+                                ))}
+                            </select>
+                        </div>
+                    )}
 
                     {/* Original Trade Close Section (only when rolling) */}
                     {isRolling && rollFromTrade && (
@@ -95,7 +119,7 @@ export const TradeModal = ({
                                 type="text" name="ticker" required
                                 value={formData.ticker} onChange={handleInputChange}
                                 className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 uppercase bg-white dark:bg-slate-700 text-slate-900 dark:text-white"
-                                placeholder="e.g. SOXL"
+                                placeholder="e.g. GOOG"
                                 readOnly={isRolling}
                             />
                         </div>
@@ -224,7 +248,7 @@ export const TradeModal = ({
 
                     <div className="pt-4 flex gap-3">
                         <button type="button" onClick={closeModal} className="flex-1 px-4 py-2 border border-slate-300 dark:border-slate-600 rounded-lg text-slate-700 dark:text-slate-300 font-medium hover:bg-slate-50 dark:hover:bg-slate-700">Cancel</button>
-                        <button type="submit" className="flex-1 px-4 py-2 bg-indigo-600 dark:bg-indigo-500 rounded-lg text-white font-semibold hover:bg-indigo-700 dark:hover:bg-indigo-600">
+                        <button type="submit" disabled={needsAccountPicker && !modalAccountId} className="flex-1 px-4 py-2 bg-indigo-600 dark:bg-indigo-500 rounded-lg text-white font-semibold hover:bg-indigo-700 dark:hover:bg-indigo-600 disabled:bg-slate-300 dark:disabled:bg-slate-600">
                             {editingId ? 'Update Trade' : isRolling ? 'Roll & Create New' : 'Save Trade'}
                         </button>
                     </div>

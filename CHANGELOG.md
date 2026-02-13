@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.11.1
+
+### Bug Fixes
+- **Fund Journal Add button** — No longer greyed out when viewing "All Accounts"; shows account picker in modal instead
+- **FundTransactionModal stale state** — Fixed form showing previous transaction data when reopening (replaced useState initializer with useEffect reset)
+- **Account picker in modals** — All three modals (Trade, Fund Transaction, Stock) now include an account dropdown when creating from "All Accounts" view
+- **TradeModal submit validation** — Submit button properly disabled until account is selected when account picker is shown
+- **modalAccountId reset** — Prevented stale account selection from carrying over between modal opens
+- **Clean payloads** — Removed leaked empty `accountId` from form data when not using account picker
+
+### Improvements
+- **Consistent label styling** — Account picker labels now match across all modals (uppercase, semibold, with asterisk)
+- **Trade ticker placeholder** — Changed default placeholder from "SOXL" to "GOOG"
+
 ## v0.11.0
 
 ### Multi-Account Support

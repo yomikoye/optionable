@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { X, TrendingUp, TrendingDown } from 'lucide-react';
 
-export const StockModal = ({ isOpen, onClose, onSave, editingStock, isSelling }) => {
+export const StockModal = ({ isOpen, onClose, onSave, editingStock, isSelling, accounts, selectedAccountId }) => {
     const [formData, setFormData] = useState({});
 
     // Reset form when modal opens or editing context changes
@@ -26,11 +26,14 @@ export const StockModal = ({ isOpen, onClose, onSave, editingStock, isSelling })
                 costBasis: '',
                 acquiredDate: new Date().toISOString().split('T')[0],
                 notes: '',
+                accountId: '',
             });
         }
     }, [editingStock, isSelling, isOpen]);
 
     if (!isOpen) return null;
+
+    const needsAccountPicker = !selectedAccountId && !editingStock;
 
     const handleSubmit = (e) => {
         e.preventDefault();
@@ -40,13 +43,20 @@ export const StockModal = ({ isOpen, onClose, onSave, editingStock, isSelling })
                 salePrice: Number(formData.salePrice),
             });
         } else {
-            onSave({
-                ...formData,
+            const { accountId, ...rest } = formData;
+            const data = {
+                ...rest,
                 shares: Number(formData.shares),
                 costBasis: Number(formData.costBasis),
-            });
+            };
+            if (needsAccountPicker) {
+                data.accountId = Number(accountId);
+            }
+            onSave(data);
         }
     };
+
+    const isValid = !needsAccountPicker || formData.accountId;
 
     const totalCost = (Number(formData.shares) || 0) * (Number(formData.costBasis) || 0);
 
@@ -127,6 +137,22 @@ export const StockModal = ({ isOpen, onClose, onSave, editingStock, isSelling })
                     ) : (
                         <>
                             {/* Buy / Edit form */}
+                            {needsAccountPicker && (
+                                <div>
+                                    <label className="block text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase mb-1">Account *</label>
+                                    <select
+                                        value={formData.accountId}
+                                        onChange={(e) => setFormData(prev => ({ ...prev, accountId: e.target.value }))}
+                                        className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 bg-white dark:bg-slate-700 text-slate-900 dark:text-white"
+                                        required
+                                    >
+                                        <option value="">Select account...</option>
+                                        {(accounts || []).map(a => (
+                                            <option key={a.id} value={a.id}>{a.name}</option>
+                                        ))}
+                                    </select>
+                                </div>
+                            )}
                             <div>
                                 <label className="block text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase mb-1">Ticker *</label>
                                 <input
@@ -210,7 +236,8 @@ export const StockModal = ({ isOpen, onClose, onSave, editingStock, isSelling })
                         </button>
                         <button
                             type="submit"
-                            className={`flex-1 px-4 py-2 rounded-lg font-semibold text-white ${
+                            disabled={!isValid}
+                            className={`flex-1 px-4 py-2 rounded-lg font-semibold text-white disabled:bg-slate-300 dark:disabled:bg-slate-600 ${
                                 isSelling
                                     ? 'bg-red-600 hover:bg-red-700 dark:bg-red-500 dark:hover:bg-red-600'
                                     : 'bg-indigo-600 hover:bg-indigo-700 dark:bg-indigo-500 dark:hover:bg-indigo-600'

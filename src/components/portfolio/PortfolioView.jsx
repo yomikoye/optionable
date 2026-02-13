@@ -19,6 +19,7 @@ export const PortfolioView = ({
     onDeleteStock,
     showToast,
     selectedAccountId,
+    accounts,
     buyStockTrigger
 }) => {
     return (
@@ -35,6 +36,7 @@ export const PortfolioView = ({
                 onDelete={onDeleteFundTransaction}
                 showToast={showToast}
                 selectedAccountId={selectedAccountId}
+                accounts={accounts}
             />
             <StocksTable
                 stocks={stocks}
@@ -43,6 +45,7 @@ export const PortfolioView = ({
                 onDelete={onDeleteStock}
                 showToast={showToast}
                 selectedAccountId={selectedAccountId}
+                accounts={accounts}
                 buyTrigger={buyStockTrigger}
             />
         </div>

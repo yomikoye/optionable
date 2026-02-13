@@ -272,6 +272,7 @@ export default function App() {
                         onDeleteStock={portfolio.deleteStock}
                         showToast={showToast}
                         selectedAccountId={selectedAccountId}
+                        accounts={accounts}
                         buyStockTrigger={buyStockTrigger}
                     />
                 )}
@@ -297,6 +298,10 @@ export default function App() {
                 handleInputChange={tradeForm.handleInputChange}
                 closeModal={tradeForm.closeModal}
                 saveTrade={tradeForm.saveTrade}
+                accounts={accounts}
+                selectedAccountId={selectedAccountId}
+                modalAccountId={tradeForm.modalAccountId}
+                setModalAccountId={tradeForm.setModalAccountId}
             />
 
             {/* Settings Modal */}

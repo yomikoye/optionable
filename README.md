@@ -2,7 +2,7 @@
 
 A self-hosted wheel strategy tracker for Cash Secured Puts (CSPs) and Covered Calls (CCs) with multi-account support and portfolio management.
 
-![Version](https://img.shields.io/badge/version-0.11.0-blue)
+![Version](https://img.shields.io/badge/version-0.11.1-blue)
 ![Docker](https://img.shields.io/badge/docker-yomikoye%2Foptionable-green)
 ![Platforms](https://img.shields.io/badge/platforms-amd64%20%7C%20arm64-lightgrey)
 
@@ -185,7 +185,7 @@ src/
 ```bash
 # Multi-platform build and push
 docker buildx build --platform linux/amd64,linux/arm64 \
-  -t yomikoye/optionable:0.11.0 \
+  -t yomikoye/optionable:0.11.1 \
   -t yomikoye/optionable:latest \
   --push .
 ```

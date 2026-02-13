@@ -24,6 +24,7 @@ export const useTradeForm = ({ refreshAll, showToast, setError, setCurrentPage, 
     const [isRolling, setIsRolling] = useState(false);
     const [rollFromTrade, setRollFromTrade] = useState(null);
     const [rollClosePrice, setRollClosePrice] = useState('');
+    const [modalAccountId, setModalAccountId] = useState(null);
 
     const handleInputChange = useCallback((e) => {
         const { name, value } = e.target;
@@ -33,6 +34,7 @@ export const useTradeForm = ({ refreshAll, showToast, setError, setCurrentPage, 
     const openModal = useCallback((trade = null) => {
         setIsRolling(false);
         setRollFromTrade(null);
+        setModalAccountId(null);
         if (trade) {
             setEditingId(trade.id);
             setFormData({
@@ -64,6 +66,7 @@ export const useTradeForm = ({ refreshAll, showToast, setError, setCurrentPage, 
         setEditingId(null);
         setIsRolling(false);
         setRollFromTrade(null);
+        setModalAccountId(null);
         setFormData({
             ticker: trade.ticker,
             openedDate: new Date().toISOString().split('T')[0],
@@ -87,6 +90,7 @@ export const useTradeForm = ({ refreshAll, showToast, setError, setCurrentPage, 
         setIsRolling(true);
         setRollFromTrade(trade);
         setRollClosePrice('');
+        setModalAccountId(null);
         setFormData({
             ticker: trade.ticker,
             openedDate: new Date().toISOString().split('T')[0],
@@ -109,6 +113,7 @@ export const useTradeForm = ({ refreshAll, showToast, setError, setCurrentPage, 
         setEditingId(null);
         setIsRolling(false);
         setRollFromTrade(null);
+        setModalAccountId(null);
         setFormData({
             ticker: cspTrade.ticker,
             openedDate: new Date().toISOString().split('T')[0],
@@ -134,6 +139,7 @@ export const useTradeForm = ({ refreshAll, showToast, setError, setCurrentPage, 
         setIsRolling(false);
         setRollFromTrade(null);
         setRollClosePrice('');
+        setModalAccountId(null);
     }, []);
 
     const saveTrade = useCallback(async (e) => {
@@ -173,7 +179,7 @@ export const useTradeForm = ({ refreshAll, showToast, setError, setCurrentPage, 
             status: formData.status,
             parentTradeId: formData.parentTradeId || null,
             notes: formData.notes || null,
-            accountId: accountId || null,
+            accountId: accountId || modalAccountId || null,
         };
 
         try {
@@ -209,7 +215,7 @@ export const useTradeForm = ({ refreshAll, showToast, setError, setCurrentPage, 
             console.error('Error saving trade:', err);
             setError('Failed to save trade. Please try again.');
         }
-    }, [isRolling, rollFromTrade, rollClosePrice, formData, editingId, refreshAll, closeModal, setError, setCurrentPage]);
+    }, [isRolling, rollFromTrade, rollClosePrice, formData, editingId, accountId, modalAccountId, refreshAll, closeModal, setError, setCurrentPage]);
 
     const deleteTrade = useCallback(async (id) => {
         if (!window.confirm('Are you sure you want to delete this trade?')) return;
@@ -255,6 +261,8 @@ export const useTradeForm = ({ refreshAll, showToast, setError, setCurrentPage, 
         rollFromTrade,
         rollClosePrice,
         setRollClosePrice,
+        modalAccountId,
+        setModalAccountId,
         handleInputChange,
         openModal,
         closeModal,

@@ -17,7 +17,7 @@ const STATUS_TABS = [
     { key: 'all', label: 'All' }
 ];
 
-export const StocksTable = ({ stocks, onCreate, onUpdate, onDelete, showToast, selectedAccountId, buyTrigger }) => {
+export const StocksTable = ({ stocks, onCreate, onUpdate, onDelete, showToast, selectedAccountId, accounts, buyTrigger }) => {
     const [showModal, setShowModal] = useState(false);
     const [editingStock, setEditingStock] = useState(null);
     const [isSelling, setIsSelling] = useState(false);
@@ -380,6 +380,8 @@ export const StocksTable = ({ stocks, onCreate, onUpdate, onDelete, showToast, s
                 onSave={handleSave}
                 editingStock={editingStock}
                 isSelling={isSelling}
+                accounts={accounts}
+                selectedAccountId={selectedAccountId}
             />
         </div>
     );
