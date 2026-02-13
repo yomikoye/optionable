@@ -12,6 +12,10 @@ import statsRouter from './routes/stats.js';
 import positionsRouter from './routes/positions.js';
 import pricesRouter from './routes/prices.js';
 import settingsRouter from './routes/settings.js';
+import accountsRouter from './routes/accounts.js';
+import fundTransactionsRouter from './routes/fundTransactions.js';
+import stocksRouter from './routes/stocks.js';
+import portfolioRouter from './routes/portfolio.js';
 
 // Run startup sequence: migrations → FK enable → fixups → seed
 handleLegacyDb();
@@ -39,6 +43,10 @@ export const createApp = (rootDir) => {
     app.use('/api/positions', positionsRouter);
     app.use('/api/prices', pricesRouter);
     app.use('/api/settings', settingsRouter);
+    app.use('/api/accounts', accountsRouter);
+    app.use('/api/fund-transactions', fundTransactionsRouter);
+    app.use('/api/stocks', stocksRouter);
+    app.use('/api/portfolio', portfolioRouter);
 
     // Catch-all for SPA routing in production
     if (process.env.NODE_ENV === 'production') {

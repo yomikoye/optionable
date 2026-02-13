@@ -104,3 +104,116 @@ export const healthApi = {
         return request('/health');
     }
 };
+
+// Accounts API
+export const accountsApi = {
+    getAll: async () => {
+        return request('/accounts');
+    },
+    getById: async (id) => {
+        return request(`/accounts/${id}`);
+    },
+    create: async (data) => {
+        return request('/accounts', {
+            method: 'POST',
+            body: JSON.stringify(data)
+        });
+    },
+    update: async (id, data) => {
+        return request(`/accounts/${id}`, {
+            method: 'PUT',
+            body: JSON.stringify(data)
+        });
+    },
+    delete: async (id) => {
+        return request(`/accounts/${id}`, {
+            method: 'DELETE'
+        });
+    }
+};
+
+// Fund Transactions API
+export const fundTransactionsApi = {
+    getAll: async (params = {}) => {
+        const searchParams = new URLSearchParams();
+        Object.entries(params).forEach(([key, value]) => {
+            if (value !== undefined && value !== null) {
+                searchParams.append(key, value);
+            }
+        });
+        const query = searchParams.toString();
+        return request(`/fund-transactions${query ? `?${query}` : ''}`);
+    },
+    create: async (data) => {
+        return request('/fund-transactions', {
+            method: 'POST',
+            body: JSON.stringify(data)
+        });
+    },
+    update: async (id, data) => {
+        return request(`/fund-transactions/${id}`, {
+            method: 'PUT',
+            body: JSON.stringify(data)
+        });
+    },
+    delete: async (id) => {
+        return request(`/fund-transactions/${id}`, {
+            method: 'DELETE'
+        });
+    }
+};
+
+// Stocks API
+export const stocksApi = {
+    getAll: async (params = {}) => {
+        const searchParams = new URLSearchParams();
+        Object.entries(params).forEach(([key, value]) => {
+            if (value !== undefined && value !== null) {
+                searchParams.append(key, value);
+            }
+        });
+        const query = searchParams.toString();
+        return request(`/stocks${query ? `?${query}` : ''}`);
+    },
+    create: async (data) => {
+        return request('/stocks', {
+            method: 'POST',
+            body: JSON.stringify(data)
+        });
+    },
+    update: async (id, data) => {
+        return request(`/stocks/${id}`, {
+            method: 'PUT',
+            body: JSON.stringify(data)
+        });
+    },
+    delete: async (id) => {
+        return request(`/stocks/${id}`, {
+            method: 'DELETE'
+        });
+    }
+};
+
+// Portfolio API
+export const portfolioApi = {
+    getStats: async (params = {}) => {
+        const searchParams = new URLSearchParams();
+        Object.entries(params).forEach(([key, value]) => {
+            if (value !== undefined && value !== null) {
+                searchParams.append(key, value);
+            }
+        });
+        const query = searchParams.toString();
+        return request(`/portfolio/stats${query ? `?${query}` : ''}`);
+    },
+    getMonthly: async (params = {}) => {
+        const searchParams = new URLSearchParams();
+        Object.entries(params).forEach(([key, value]) => {
+            if (value !== undefined && value !== null) {
+                searchParams.append(key, value);
+            }
+        });
+        const query = searchParams.toString();
+        return request(`/portfolio/monthly${query ? `?${query}` : ''}`);
+    }
+};

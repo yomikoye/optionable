@@ -28,3 +28,18 @@ export const STATUS_FILTERS = {
     OPEN: 'open',
     CLOSED: 'closed'
 };
+
+// Fund transaction types
+export const FUND_TRANSACTION_TYPES = [
+    { value: 'deposit', label: 'Deposit' },
+    { value: 'withdrawal', label: 'Withdrawal' },
+    { value: 'dividend', label: 'Dividend' },
+    { value: 'interest', label: 'Interest' },
+    { value: 'fee', label: 'Fee' },
+];
+
+// App tabs
+export const TABS = {
+    OPTIONS: 'options',
+    PORTFOLIO: 'portfolio'
+};

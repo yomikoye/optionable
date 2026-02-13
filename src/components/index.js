@@ -4,6 +4,7 @@ export { WelcomeModal } from './ui/WelcomeModal';
 
 // Layout Components
 export { Header } from './layout/Header';
+export { TabBar } from './layout/TabBar';
 
 // Dashboard Components
 export { Dashboard } from './dashboard/Dashboard';
@@ -21,3 +22,13 @@ export { PositionsTable } from './positions/PositionsTable';
 
 // Settings Components
 export { SettingsModal } from './settings/SettingsModal';
+
+// Portfolio Components
+export { PortfolioView } from './portfolio/PortfolioView';
+export { PortfolioDashboard } from './portfolio/PortfolioDashboard';
+export { FundJournal } from './portfolio/FundJournal';
+export { FundTransactionModal } from './portfolio/FundTransactionModal';
+export { StocksTable } from './portfolio/StocksTable';
+export { StockModal } from './portfolio/StockModal';
+export { MonthlyPLChart } from './portfolio/MonthlyPLChart';
+export { IncomeSourcesChart } from './portfolio/IncomeSourcesChart';

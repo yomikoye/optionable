@@ -31,3 +31,23 @@ export const positionToApi = (position) => {
         capitalGainLoss: toDollars(position.capitalGainLoss)
     };
 };
+
+// Convert a fund transaction from DB (cents) to API (dollars)
+export const fundTransactionToApi = (txn) => {
+    if (!txn) return null;
+    return {
+        ...txn,
+        amount: toDollars(txn.amount)
+    };
+};
+
+// Convert a stock from DB (cents) to API (dollars)
+export const stockToApi = (stock) => {
+    if (!stock) return null;
+    return {
+        ...stock,
+        costBasis: toDollars(stock.costBasis),
+        salePrice: toDollars(stock.salePrice),
+        capitalGainLoss: toDollars(stock.capitalGainLoss)
+    };
+};

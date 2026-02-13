@@ -75,6 +75,81 @@ export const validateTrade = (trade, isUpdate = false) => {
     return errors;
 };
 
+export const validateAccount = (data, isUpdate = false) => {
+    const errors = [];
+    if (data.name !== undefined) {
+        if (typeof data.name !== 'string' || data.name.trim() === '') {
+            errors.push('name must be a non-empty string');
+        }
+    } else if (!isUpdate) {
+        errors.push('name is required');
+    }
+    return errors;
+};
+
+export const VALID_FUND_TRANSACTION_TYPES = ['deposit', 'withdrawal', 'dividend', 'interest', 'fee'];
+
+export const validateFundTransaction = (data, isUpdate = false) => {
+    const errors = [];
+    const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+
+    if (!isUpdate) {
+        if (!data.accountId) errors.push('accountId is required');
+        if (!data.type) errors.push('type is required');
+        if (data.amount === undefined || data.amount === null) errors.push('amount is required');
+        if (!data.date) errors.push('date is required');
+    }
+
+    if (data.type !== undefined && !VALID_FUND_TRANSACTION_TYPES.includes(data.type)) {
+        errors.push(`type must be one of: ${VALID_FUND_TRANSACTION_TYPES.join(', ')}`);
+    }
+
+    if (data.amount !== undefined && data.amount !== null) {
+        const amount = Number(data.amount);
+        if (isNaN(amount) || amount <= 0) errors.push('amount must be a positive number');
+    }
+
+    if (data.date !== undefined && data.date !== null) {
+        if (!dateRegex.test(data.date)) errors.push('date must be in YYYY-MM-DD format');
+    }
+
+    return errors;
+};
+
+export const validateStock = (data, isUpdate = false) => {
+    const errors = [];
+    const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+
+    if (!isUpdate) {
+        if (!data.accountId) errors.push('accountId is required');
+        if (!data.ticker || typeof data.ticker !== 'string' || data.ticker.trim() === '') errors.push('ticker is required');
+        if (data.shares === undefined || data.shares === null) errors.push('shares is required');
+        if (data.costBasis === undefined || data.costBasis === null) errors.push('costBasis is required');
+        if (!data.acquiredDate) errors.push('acquiredDate is required');
+    }
+
+    if (data.shares !== undefined && data.shares !== null) {
+        const shares = Number(data.shares);
+        if (isNaN(shares) || shares < 1 || !Number.isInteger(shares)) errors.push('shares must be a positive integer');
+    }
+
+    if (data.costBasis !== undefined && data.costBasis !== null) {
+        const cost = Number(data.costBasis);
+        if (isNaN(cost) || cost < 0) errors.push('costBasis must be a non-negative number');
+    }
+
+    if (data.salePrice !== undefined && data.salePrice !== null) {
+        const price = Number(data.salePrice);
+        if (isNaN(price) || price < 0) errors.push('salePrice must be a non-negative number');
+    }
+
+    if (data.acquiredDate !== undefined && data.acquiredDate !== null) {
+        if (!dateRegex.test(data.acquiredDate)) errors.push('acquiredDate must be in YYYY-MM-DD format');
+    }
+
+    return errors;
+};
+
 export const validatePosition = (position, isUpdate = false) => {
     const errors = [];
 

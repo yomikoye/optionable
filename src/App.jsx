@@ -1,40 +1,58 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { X } from 'lucide-react';
+import { X, TrendingUp } from 'lucide-react';
 
 // Shared utilities
 import { APP_VERSION } from './utils/constants';
 
 // Hooks
 import { useTheme } from './hooks/useTheme';
+import { useAccounts } from './hooks/useAccounts';
 import { useTrades } from './hooks/useTrades';
 import { useStats } from './hooks/useStats';
 import { useFilterSort } from './hooks/useFilterSort';
 import { useTradeForm } from './hooks/useTradeForm';
 import { useCSV } from './hooks/useCSV';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
+import { usePortfolio } from './hooks/usePortfolio';
 
 // Components
 import {
     Toast,
     WelcomeModal,
     Header,
+    TabBar,
     Dashboard,
     PnLChart,
     TradeTable,
     TradeModal,
     SummaryCards,
     PositionsTable,
-    SettingsModal
+    SettingsModal,
+    PortfolioView
 } from './components';
 
 import { API_URL } from './utils/constants';
 
 // --- Main Component ---
 export default function App() {
-    // Core data hooks
-    const { trades, loading, error, setError, fetchTrades } = useTrades();
+    // Account management
+    const {
+        accounts,
+        selectedAccountId,
+        setSelectedAccountId,
+        fetchAccounts,
+        createAccount,
+        renameAccount,
+        deleteAccount
+    } = useAccounts();
+
+    // Core data hooks (pass accountId for filtering)
+    const { trades, loading, error, setError, fetchTrades } = useTrades(selectedAccountId);
     const { darkMode, setDarkMode } = useTheme();
-    const { stats, chainInfo, chartData, chartPeriod, setChartPeriod, fetchCapitalGainsStats } = useStats(trades);
+    const { stats, chainInfo, chartData, chartPeriod, setChartPeriod, fetchCapitalGainsStats } = useStats(trades, selectedAccountId);
+
+    // Portfolio hook
+    const portfolio = usePortfolio(selectedAccountId);
 
     // Compose refreshAll at App level
     const refreshAll = useCallback(async () => {
@@ -58,15 +76,27 @@ export default function App() {
     } = useFilterSort(trades);
 
     // Trade form (modal, CRUD)
-    const tradeForm = useTradeForm({ refreshAll, showToast, setError, setCurrentPage });
+    const tradeForm = useTradeForm({ refreshAll, showToast, setError, setCurrentPage, accountId: selectedAccountId });
 
     // CSV import/export
-    const { exportToCSV, importFromCSV } = useCSV({ trades, refreshAll, showToast, setError });
+    const { exportToCSV, importFromCSV } = useCSV({
+        trades,
+        fundTransactions: portfolio.fundTransactions,
+        stocks: portfolio.stocks,
+        refreshAll,
+        refreshPortfolio: portfolio.fetchAll,
+        showToast,
+        setError,
+        accountId: selectedAccountId
+    });
 
     // Panel visibility
-    const [showPositions, setShowPositions] = useState(false);
     const [showSettings, setShowSettings] = useState(false);
     const [showHelp, setShowHelp] = useState(false);
+
+    // Tab state for portfolio mode
+    const [activeTab, setActiveTab] = useState('options');
+    const [buyStockTrigger, setBuyStockTrigger] = useState(0);
 
     // App settings
     const [appSettings, setAppSettings] = useState({
@@ -90,23 +120,23 @@ export default function App() {
         fetchSettings();
     }, []);
 
+    const portfolioModeEnabled = appSettings.portfolio_mode_enabled === 'true';
+    const isPortfolioTab = portfolioModeEnabled && activeTab === 'portfolio';
+
     // Keyboard shortcuts
-    const anyModalOpen = tradeForm.isModalOpen || showPositions || showSettings || showHelp;
+    const anyModalOpen = tradeForm.isModalOpen || showSettings || showHelp;
 
     const handleEscape = useCallback(() => {
         if (tradeForm.isModalOpen) tradeForm.closeModal();
-        if (showPositions) setShowPositions(false);
         if (showSettings) setShowSettings(false);
         if (showHelp) setShowHelp(false);
-    }, [tradeForm.isModalOpen, showPositions, showSettings, showHelp, tradeForm.closeModal]);
+    }, [tradeForm.isModalOpen, showSettings, showHelp, tradeForm.closeModal]);
 
     const keyMap = useMemo(() => ({
         n: () => tradeForm.openModal(),
-        p: () => setShowPositions(true),
         s: () => setShowSettings(true),
-        d: () => setDarkMode(prev => !prev),
         h: () => setShowHelp(true),
-    }), [tradeForm.openModal, setDarkMode]);
+    }), [tradeForm.openModal]);
 
     useKeyboardShortcuts({ onEscape: handleEscape, isModalOpen: anyModalOpen, keyMap });
 
@@ -161,49 +191,90 @@ export default function App() {
 
                 {/* Header */}
                 <Header
-                    darkMode={darkMode}
-                    onToggleTheme={() => setDarkMode(!darkMode)}
                     onExport={exportToCSV}
                     onImport={importFromCSV}
-                    onNewTrade={() => tradeForm.openModal()}
-                    onOpenPositions={() => setShowPositions(true)}
+                    onNewTrade={isPortfolioTab
+                        ? () => setBuyStockTrigger(t => t + 1)
+                        : () => tradeForm.openModal()
+                    }
+                    newTradeLabel={isPortfolioTab ? 'Buy Stock' : 'New Trade'}
+                    newTradeIcon={isPortfolioTab ? TrendingUp : undefined}
                     onOpenSettings={() => setShowSettings(true)}
                     version={APP_VERSION}
+                    accounts={accounts}
+                    selectedAccountId={selectedAccountId}
+                    onAccountChange={setSelectedAccountId}
                 />
 
-                {/* Dashboard Grid */}
-                <Dashboard stats={stats} />
+                {/* Tab Bar (only when portfolio mode enabled) */}
+                {portfolioModeEnabled && (
+                    <TabBar activeTab={activeTab} onTabChange={setActiveTab} />
+                )}
 
-                {/* P/L Chart */}
-                <PnLChart
-                    chartData={chartData}
-                    chartPeriod={chartPeriod}
-                    onPeriodChange={setChartPeriod}
-                    totalPnL={stats.totalPnL}
-                    darkMode={darkMode}
-                />
+                {/* Options View */}
+                {(!portfolioModeEnabled || activeTab === 'options') && (
+                    <>
+                        {/* Dashboard Grid */}
+                        <Dashboard stats={stats} />
 
-                {/* Trade Table */}
-                <TradeTable
-                    trades={trades}
-                    filteredAndSortedTrades={filteredAndSortedTrades}
-                    statusFilter={statusFilter}
-                    setStatusFilter={setStatusFilter}
-                    sortConfig={sortConfig}
-                    setSortConfig={setSortConfig}
-                    currentPage={currentPage}
-                    setCurrentPage={setCurrentPage}
-                    onQuickClose={tradeForm.quickCloseTrade}
-                    onRoll={tradeForm.rollTrade}
-                    onEdit={tradeForm.openModal}
-                    onDelete={tradeForm.deleteTrade}
-                    onOpenCC={tradeForm.openCoveredCall}
-                    confirmExpireEnabled={appSettings.confirm_expire_enabled !== 'false'}
-                    livePricesEnabled={appSettings.live_prices_enabled === 'true'}
-                />
+                        {/* P/L Chart */}
+                        <PnLChart
+                            chartData={chartData}
+                            chartPeriod={chartPeriod}
+                            onPeriodChange={setChartPeriod}
+                            totalPnL={stats.totalPnL}
+                            darkMode={darkMode}
+                        />
 
-                {/* Summary Cards */}
-                <SummaryCards stats={stats} />
+                        {/* Trade Table */}
+                        <TradeTable
+                            trades={trades}
+                            filteredAndSortedTrades={filteredAndSortedTrades}
+                            statusFilter={statusFilter}
+                            setStatusFilter={setStatusFilter}
+                            sortConfig={sortConfig}
+                            setSortConfig={setSortConfig}
+                            currentPage={currentPage}
+                            setCurrentPage={setCurrentPage}
+                            onQuickClose={tradeForm.quickCloseTrade}
+                            onRoll={tradeForm.rollTrade}
+                            onEdit={tradeForm.openModal}
+                            onDelete={tradeForm.deleteTrade}
+                            onOpenCC={tradeForm.openCoveredCall}
+                            confirmExpireEnabled={appSettings.confirm_expire_enabled !== 'false'}
+                            livePricesEnabled={appSettings.live_prices_enabled === 'true'}
+                        />
+
+                        {/* Stock Positions (from assignments) */}
+                        <PositionsTable
+                            showToast={showToast}
+                            accountId={selectedAccountId}
+                        />
+
+                        {/* Summary Cards */}
+                        <SummaryCards stats={stats} />
+                    </>
+                )}
+
+                {/* Portfolio View */}
+                {portfolioModeEnabled && activeTab === 'portfolio' && (
+                    <PortfolioView
+                        portfolioStats={portfolio.portfolioStats}
+                        monthlyData={portfolio.monthlyData}
+                        darkMode={darkMode}
+                        fundTransactions={portfolio.fundTransactions}
+                        stocks={portfolio.stocks}
+                        onCreateFundTransaction={portfolio.createFundTransaction}
+                        onUpdateFundTransaction={portfolio.updateFundTransaction}
+                        onDeleteFundTransaction={portfolio.deleteFundTransaction}
+                        onCreateStock={portfolio.createStock}
+                        onUpdateStock={portfolio.updateStock}
+                        onDeleteStock={portfolio.deleteStock}
+                        showToast={showToast}
+                        selectedAccountId={selectedAccountId}
+                        buyStockTrigger={buyStockTrigger}
+                    />
+                )}
 
             </div>
 
@@ -228,19 +299,18 @@ export default function App() {
                 saveTrade={tradeForm.saveTrade}
             />
 
-            {/* Positions Modal */}
-            {showPositions && (
-                <PositionsTable
-                    onClose={() => setShowPositions(false)}
-                    showToast={showToast}
-                />
-            )}
-
             {/* Settings Modal */}
             {showSettings && (
                 <SettingsModal
                     onClose={() => { setShowSettings(false); fetchSettings(); }}
                     showToast={showToast}
+                    accounts={accounts}
+                    onCreateAccount={createAccount}
+                    onRenameAccount={renameAccount}
+                    onDeleteAccount={deleteAccount}
+                    onAccountsChanged={fetchAccounts}
+                    darkMode={darkMode}
+                    onToggleTheme={() => setDarkMode(!darkMode)}
                 />
             )}
         </div>

@@ -1,22 +1,25 @@
 import React, { useState, useEffect } from 'react';
-import { Wallet, TrendingUp, TrendingDown, RefreshCw, X } from 'lucide-react';
+import { Wallet, TrendingUp, TrendingDown, RefreshCw } from 'lucide-react';
 import { formatCurrency } from '../../utils/formatters';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
 
-export const PositionsTable = ({ onClose, showToast }) => {
+export const PositionsTable = ({ showToast, accountId }) => {
     const [positions, setPositions] = useState([]);
     const [summary, setSummary] = useState(null);
     const [prices, setPrices] = useState({});
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
-    const [filter, setFilter] = useState('all'); // all, open, closed
+    const [filter, setFilter] = useState('open');
 
     const fetchPositions = async () => {
         try {
+            const acctParam = accountId ? `accountId=${accountId}&` : '';
+            const statusParam = filter !== 'all' ? `status=${filter}` : '';
+            const query = [acctParam, statusParam].filter(Boolean).join('&');
             const [posRes, summaryRes] = await Promise.all([
-                fetch(`${API_URL}/api/positions${filter !== 'all' ? `?status=${filter}` : ''}`),
-                fetch(`${API_URL}/api/positions/summary`)
+                fetch(`${API_URL}/api/positions${query ? `?${query}` : ''}`),
+                fetch(`${API_URL}/api/positions/summary${accountId ? `?accountId=${accountId}` : ''}`)
             ]);
 
             const posData = await posRes.json();
@@ -26,7 +29,6 @@ export const PositionsTable = ({ onClose, showToast }) => {
             if (summaryData.success) setSummary(summaryData.data);
         } catch (error) {
             console.error('Error fetching positions:', error);
-            showToast?.('Failed to fetch positions', 'error');
         } finally {
             setLoading(false);
         }
@@ -47,13 +49,9 @@ export const PositionsTable = ({ onClose, showToast }) => {
             const data = await res.json();
             if (data.success) {
                 setPrices(data.data);
-                if (Object.values(data.data).some(p => !p.live)) {
-                    showToast?.('Some prices from cache', 'warning');
-                }
             }
         } catch (error) {
             console.error('Error fetching prices:', error);
-            showToast?.('Failed to fetch live prices', 'error');
         } finally {
             setRefreshing(false);
         }
@@ -61,7 +59,7 @@ export const PositionsTable = ({ onClose, showToast }) => {
 
     useEffect(() => {
         fetchPositions();
-    }, [filter]);
+    }, [filter, accountId]);
 
     useEffect(() => {
         if (positions.length > 0) {
@@ -69,175 +67,144 @@ export const PositionsTable = ({ onClose, showToast }) => {
         }
     }, [positions.length]);
 
-    const calculateUnrealizedGL = (position) => {
-        const price = prices[position.ticker]?.price;
-        if (!price) return null;
-        return (price - position.costBasis) * position.shares;
-    };
-
     const totalUnrealizedGL = positions
         .filter(p => !p.soldDate)
         .reduce((sum, p) => {
-            const gl = calculateUnrealizedGL(p);
-            return sum + (gl || 0);
+            const price = prices[p.ticker]?.price;
+            if (!price) return sum;
+            return sum + (price - p.costBasis) * p.shares;
         }, 0);
 
     if (loading) {
         return (
-            <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-                <div className="bg-white dark:bg-slate-800 rounded-lg p-8">
-                    <div className="animate-spin w-8 h-8 border-2 border-indigo-600 border-t-transparent rounded-full mx-auto"></div>
-                    <p className="mt-4 text-slate-600 dark:text-slate-400">Loading positions...</p>
-                </div>
+            <div className="bg-white dark:bg-slate-800 rounded-lg shadow-sm border border-slate-200 dark:border-slate-700 p-8">
+                <div className="animate-spin w-6 h-6 border-2 border-indigo-600 border-t-transparent rounded-full mx-auto"></div>
             </div>
         );
     }
 
     return (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-            <div className="bg-white dark:bg-slate-800 rounded-lg shadow-xl w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
-                {/* Header */}
-                <div className="p-4 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                        <Wallet className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
-                        <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Stock Positions</h2>
-                    </div>
-                    <button
-                        onClick={onClose}
-                        className="p-2 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg"
-                    >
-                        <X className="w-5 h-5 text-slate-500" />
-                    </button>
+        <div className="bg-white dark:bg-slate-800 rounded-lg shadow-sm border border-slate-200 dark:border-slate-700">
+            {/* Header */}
+            <div className="p-4 border-b border-slate-200 dark:border-slate-700 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                <div className="flex items-center gap-2">
+                    <Wallet className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
+                    <h3 className="text-lg font-semibold text-slate-900 dark:text-white">Stock Positions</h3>
+                    {summary && (
+                        <div className="flex items-center gap-3 ml-3 text-sm">
+                            <span className="text-slate-500 dark:text-slate-400">
+                                {summary.openPositions} open
+                            </span>
+                            {summary.realizedGainLoss !== 0 && (
+                                <span className={`font-mono ${summary.realizedGainLoss >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
+                                    Realized: {formatCurrency(summary.realizedGainLoss)}
+                                </span>
+                            )}
+                            {totalUnrealizedGL !== 0 && (
+                                <span className={`font-mono ${totalUnrealizedGL >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
+                                    Unrealized: {formatCurrency(totalUnrealizedGL)}
+                                </span>
+                            )}
+                        </div>
+                    )}
                 </div>
-
-                {/* Summary Cards */}
-                {summary && (
-                    <div className="p-4 grid grid-cols-2 md:grid-cols-4 gap-3 border-b border-slate-200 dark:border-slate-700">
-                        <div className="bg-slate-50 dark:bg-slate-700/50 rounded-lg p-3">
-                            <p className="text-xs text-slate-500 dark:text-slate-400">Realized G/L</p>
-                            <p className={`text-lg font-bold font-mono ${summary.realizedGainLoss >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
-                                {formatCurrency(summary.realizedGainLoss)}
-                            </p>
-                        </div>
-                        <div className="bg-slate-50 dark:bg-slate-700/50 rounded-lg p-3">
-                            <p className="text-xs text-slate-500 dark:text-slate-400">Unrealized G/L</p>
-                            <p className={`text-lg font-bold font-mono ${totalUnrealizedGL >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
-                                {formatCurrency(totalUnrealizedGL)}
-                            </p>
-                        </div>
-                        <div className="bg-slate-50 dark:bg-slate-700/50 rounded-lg p-3">
-                            <p className="text-xs text-slate-500 dark:text-slate-400">Open Positions</p>
-                            <p className="text-lg font-bold text-slate-900 dark:text-white">{summary.openPositions}</p>
-                        </div>
-                        <div className="bg-slate-50 dark:bg-slate-700/50 rounded-lg p-3">
-                            <p className="text-xs text-slate-500 dark:text-slate-400">Closed Positions</p>
-                            <p className="text-lg font-bold text-slate-900 dark:text-white">{summary.closedPositions}</p>
-                        </div>
-                    </div>
-                )}
-
-                {/* Filter & Refresh */}
-                <div className="p-4 flex items-center justify-between">
-                    <div className="flex bg-slate-100 dark:bg-slate-700 rounded-lg p-0.5">
-                        {['all', 'open', 'closed'].map(f => (
+                <div className="flex items-center gap-2">
+                    <div className="flex gap-1">
+                        {['open', 'closed', 'all'].map(f => (
                             <button
                                 key={f}
                                 onClick={() => setFilter(f)}
-                                className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${
+                                className={`px-2 py-0.5 text-xs rounded font-medium transition-colors capitalize ${
                                     filter === f
-                                        ? 'bg-white dark:bg-slate-600 text-slate-900 dark:text-white shadow-sm'
-                                        : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300'
+                                        ? 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-400'
+                                        : 'text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-700'
                                 }`}
                             >
-                                {f.charAt(0).toUpperCase() + f.slice(1)}
+                                {f}
                             </button>
                         ))}
                     </div>
                     <button
                         onClick={fetchPrices}
                         disabled={refreshing}
-                        className="flex items-center gap-2 px-3 py-1.5 text-sm bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 rounded-lg transition-colors"
+                        className="flex items-center gap-1 px-2 py-1 text-xs bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 rounded transition-colors text-slate-600 dark:text-slate-400"
                     >
-                        <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
-                        Refresh Prices
+                        <RefreshCw className={`w-3 h-3 ${refreshing ? 'animate-spin' : ''}`} />
+                        Prices
                     </button>
                 </div>
-
-                {/* Table */}
-                <div className="flex-1 overflow-auto">
-                    {positions.length === 0 ? (
-                        <div className="p-8 text-center text-slate-500 dark:text-slate-400">
-                            <Wallet className="w-12 h-12 mx-auto mb-3 opacity-50" />
-                            <p>No positions yet</p>
-                            <p className="text-sm mt-1">Positions are created when CSP trades are assigned</p>
-                        </div>
-                    ) : (
-                        <table className="w-full">
-                            <thead className="bg-slate-50 dark:bg-slate-700/50 sticky top-0">
-                                <tr>
-                                    <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 dark:text-slate-400 uppercase">Ticker</th>
-                                    <th className="px-4 py-3 text-right text-xs font-medium text-slate-500 dark:text-slate-400 uppercase">Shares</th>
-                                    <th className="px-4 py-3 text-right text-xs font-medium text-slate-500 dark:text-slate-400 uppercase">Cost Basis</th>
-                                    <th className="px-4 py-3 text-right text-xs font-medium text-slate-500 dark:text-slate-400 uppercase">Current</th>
-                                    <th className="px-4 py-3 text-right text-xs font-medium text-slate-500 dark:text-slate-400 uppercase">G/L</th>
-                                    <th className="px-4 py-3 text-center text-xs font-medium text-slate-500 dark:text-slate-400 uppercase">Status</th>
-                                </tr>
-                            </thead>
-                            <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
-                                {positions.map(position => {
-                                    const currentPrice = position.soldDate ? position.salePrice : prices[position.ticker]?.price;
-                                    const gainLoss = position.soldDate
-                                        ? position.capitalGainLoss
-                                        : (currentPrice ? (currentPrice - position.costBasis) * position.shares : null);
-
-                                    return (
-                                        <tr key={position.id} className="hover:bg-slate-50 dark:hover:bg-slate-700/50">
-                                            <td className="px-4 py-3">
-                                                <span className="font-semibold text-slate-900 dark:text-white">{position.ticker}</span>
-                                                <span className="block text-xs text-slate-500 dark:text-slate-400">
-                                                    {position.acquiredDate}
-                                                </span>
-                                            </td>
-                                            <td className="px-4 py-3 text-right font-mono text-sm text-slate-700 dark:text-slate-300">
-                                                {position.shares}
-                                            </td>
-                                            <td className="px-4 py-3 text-right font-mono text-sm text-slate-700 dark:text-slate-300">
-                                                ${position.costBasis.toFixed(2)}
-                                            </td>
-                                            <td className="px-4 py-3 text-right font-mono text-sm">
-                                                {currentPrice ? (
-                                                    <span className="text-slate-700 dark:text-slate-300">${currentPrice.toFixed(2)}</span>
-                                                ) : (
-                                                    <span className="text-slate-400">--</span>
-                                                )}
-                                            </td>
-                                            <td className="px-4 py-3 text-right">
-                                                {gainLoss !== null ? (
-                                                    <span className={`font-mono text-sm font-medium flex items-center justify-end gap-1 ${gainLoss >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
-                                                        {gainLoss >= 0 ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
-                                                        {formatCurrency(gainLoss)}
-                                                    </span>
-                                                ) : (
-                                                    <span className="text-slate-400">--</span>
-                                                )}
-                                            </td>
-                                            <td className="px-4 py-3 text-center">
-                                                <span className={`inline-flex px-2 py-1 text-xs font-medium rounded-full ${
-                                                    position.soldDate
-                                                        ? 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-400'
-                                                        : 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400'
-                                                }`}>
-                                                    {position.soldDate ? 'Closed' : 'Open'}
-                                                </span>
-                                            </td>
-                                        </tr>
-                                    );
-                                })}
-                            </tbody>
-                        </table>
-                    )}
-                </div>
             </div>
+
+            {/* Table */}
+            {positions.length === 0 ? (
+                <div className="p-6 text-center text-slate-400 dark:text-slate-500 text-sm">
+                    No {filter !== 'all' ? filter : ''} positions. Positions are created when CSP trades are assigned.
+                </div>
+            ) : (
+                <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                        <thead>
+                            <tr className="border-b border-slate-200 dark:border-slate-700">
+                                <th className="text-left p-3 text-slate-500 dark:text-slate-400 font-medium">Ticker</th>
+                                <th className="text-right p-3 text-slate-500 dark:text-slate-400 font-medium">Shares</th>
+                                <th className="text-right p-3 text-slate-500 dark:text-slate-400 font-medium">Cost Basis</th>
+                                <th className="text-right p-3 text-slate-500 dark:text-slate-400 font-medium">Current</th>
+                                <th className="text-right p-3 text-slate-500 dark:text-slate-400 font-medium">P/L</th>
+                                <th className="text-center p-3 text-slate-500 dark:text-slate-400 font-medium">Status</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {positions.map(position => {
+                                const currentPrice = position.soldDate ? position.salePrice : prices[position.ticker]?.price;
+                                const gainLoss = position.soldDate
+                                    ? position.capitalGainLoss
+                                    : (currentPrice ? (currentPrice - position.costBasis) * position.shares : null);
+
+                                return (
+                                    <tr key={position.id} className="border-b border-slate-100 dark:border-slate-700/50 hover:bg-slate-50 dark:hover:bg-slate-700/30">
+                                        <td className="p-3">
+                                            <span className="font-medium text-slate-900 dark:text-white">{position.ticker}</span>
+                                            <span className="block text-xs text-slate-400">{position.acquiredDate}</span>
+                                        </td>
+                                        <td className="p-3 text-right font-mono text-slate-700 dark:text-slate-300">
+                                            {position.shares}
+                                        </td>
+                                        <td className="p-3 text-right font-mono text-slate-700 dark:text-slate-300">
+                                            ${position.costBasis.toFixed(2)}
+                                        </td>
+                                        <td className="p-3 text-right font-mono">
+                                            {currentPrice ? (
+                                                <span className="text-slate-700 dark:text-slate-300">${currentPrice.toFixed(2)}</span>
+                                            ) : (
+                                                <span className="text-slate-400">--</span>
+                                            )}
+                                        </td>
+                                        <td className="p-3 text-right">
+                                            {gainLoss !== null ? (
+                                                <span className={`font-mono font-medium flex items-center justify-end gap-1 ${gainLoss >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
+                                                    {gainLoss >= 0 ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
+                                                    {formatCurrency(gainLoss)}
+                                                </span>
+                                            ) : (
+                                                <span className="text-slate-400">--</span>
+                                            )}
+                                        </td>
+                                        <td className="p-3 text-center">
+                                            <span className={`inline-flex px-2 py-0.5 text-xs font-medium rounded-full ${
+                                                position.soldDate
+                                                    ? 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-400'
+                                                    : 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400'
+                                            }`}>
+                                                {position.soldDate ? 'Closed' : 'Open'}
+                                            </span>
+                                        </td>
+                                    </tr>
+                                );
+                            })}
+                        </tbody>
+                    </table>
+                </div>
+            )}
         </div>
     );
 };

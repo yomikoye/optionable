@@ -17,7 +17,7 @@ const initialFormState = {
     notes: '',
 };
 
-export const useTradeForm = ({ refreshAll, showToast, setError, setCurrentPage }) => {
+export const useTradeForm = ({ refreshAll, showToast, setError, setCurrentPage, accountId }) => {
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [formData, setFormData] = useState(initialFormState);
     const [editingId, setEditingId] = useState(null);
@@ -173,6 +173,7 @@ export const useTradeForm = ({ refreshAll, showToast, setError, setCurrentPage }
             status: formData.status,
             parentTradeId: formData.parentTradeId || null,
             notes: formData.notes || null,
+            accountId: accountId || null,
         };
 
         try {

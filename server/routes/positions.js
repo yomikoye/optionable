@@ -9,19 +9,23 @@ const router = Router();
 // GET positions summary (realized + unrealized gains) - MUST be before :id route
 router.get('/summary', (req, res) => {
     try {
+        const { accountId } = req.query;
+        const acctFilter = accountId ? 'AND accountId = ?' : '';
+        const acctParams = accountId ? [Number(accountId)] : [];
+
         // Realized gains from closed positions
         const realizedStats = db.prepare(`
             SELECT
                 COALESCE(SUM(capitalGainLoss), 0) as realizedGainLoss,
                 COUNT(*) as closedPositions
             FROM positions
-            WHERE soldDate IS NOT NULL
-        `).get();
+            WHERE soldDate IS NOT NULL ${acctFilter}
+        `).get(...acctParams);
 
         // Open positions for unrealized calculation
         const openPositions = db.prepare(`
-            SELECT * FROM positions WHERE soldDate IS NULL
-        `).all();
+            SELECT * FROM positions WHERE soldDate IS NULL ${acctFilter}
+        `).all(...acctParams);
 
         apiResponse.success(res, {
             realizedGainLoss: toDollars(realizedStats.realizedGainLoss),
@@ -38,18 +42,24 @@ router.get('/summary', (req, res) => {
 // GET all positions
 router.get('/', (req, res) => {
     try {
-        const { status } = req.query;
+        const { status, accountId } = req.query;
 
-        let query = 'SELECT * FROM positions';
+        const conditions = [];
         const params = [];
 
-        if (status === 'open') {
-            query += ' WHERE soldDate IS NULL';
-        } else if (status === 'closed') {
-            query += ' WHERE soldDate IS NOT NULL';
+        if (accountId) {
+            conditions.push('accountId = ?');
+            params.push(Number(accountId));
         }
 
-        query += ' ORDER BY acquiredDate DESC';
+        if (status === 'open') {
+            conditions.push('soldDate IS NULL');
+        } else if (status === 'closed') {
+            conditions.push('soldDate IS NOT NULL');
+        }
+
+        const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+        const query = `SELECT * FROM positions ${whereClause} ORDER BY acquiredDate DESC`;
 
         const positions = db.prepare(query).all(...params);
         apiResponse.success(res, positions.map(positionToApi));
@@ -76,7 +86,7 @@ router.get('/:id', (req, res) => {
 // POST create position (manual entry or from assignment)
 router.post('/', (req, res) => {
     try {
-        const { ticker, shares, costBasis, acquiredDate, acquiredFromTradeId } = req.body;
+        const { ticker, shares, costBasis, acquiredDate, acquiredFromTradeId, accountId } = req.body;
 
         // Validate input
         const validationErrors = validatePosition(req.body, false);
@@ -85,8 +95,8 @@ router.post('/', (req, res) => {
         }
 
         const stmt = db.prepare(`
-            INSERT INTO positions (ticker, shares, costBasis, acquiredDate, acquiredFromTradeId)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO positions (ticker, shares, costBasis, acquiredDate, acquiredFromTradeId, accountId)
+            VALUES (?, ?, ?, ?, ?, ?)
         `);
 
         const result = stmt.run(
@@ -94,7 +104,8 @@ router.post('/', (req, res) => {
             shares,
             toCents(costBasis),
             acquiredDate,
-            acquiredFromTradeId || null
+            acquiredFromTradeId || null,
+            accountId || null
         );
 
         const newPosition = db.prepare('SELECT * FROM positions WHERE id = ?').get(result.lastInsertRowid);

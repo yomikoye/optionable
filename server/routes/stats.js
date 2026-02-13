@@ -8,6 +8,12 @@ const router = Router();
 // GET stats/summary - Using SQL aggregations for performance
 router.get('/', (req, res) => {
     try {
+        const { accountId } = req.query;
+        // Build account filter fragments
+        const acctWhere = accountId ? 'WHERE accountId = ?' : '';
+        const acctAnd = accountId ? 'AND accountId = ?' : '';
+        const acctParams = accountId ? [Number(accountId)] : [];
+
         // Main stats aggregation - single query
         const mainStats = db.prepare(`
             SELECT
@@ -21,7 +27,8 @@ router.get('/', (req, res) => {
                 COALESCE(SUM(entryPrice * quantity * 100), 0) as totalPremium,
                 COALESCE(SUM(CASE WHEN status = 'Open' THEN strike * quantity * 100 ELSE 0 END), 0) as capitalAtRisk
             FROM trades
-        `).get();
+            ${acctWhere}
+        `).get(...acctParams);
 
         // Chain statistics - count roots and resolved chains
         const chainStats = db.prepare(`
@@ -29,10 +36,11 @@ router.get('/', (req, res) => {
                 COUNT(*) as totalChains,
                 COUNT(CASE WHEN status NOT IN ('Open', 'Rolled') THEN 1 END) as resolvedChains
             FROM trades
-            WHERE parentTradeId IS NULL
-        `).get();
+            WHERE parentTradeId IS NULL ${acctAnd}
+        `).get(...acctParams);
 
         // Calculate chain P/L using recursive CTE (no N+1 queries)
+        // Account filter only on base case (roots); children follow via parentTradeId
         const chainPnLStats = db.prepare(`
             WITH RECURSIVE chain_walk AS (
                 -- Base: start from root trades (no parent)
@@ -42,7 +50,7 @@ router.get('/', (req, res) => {
                     (entryPrice - closePrice) * quantity * 100 as chain_pnl,
                     status as final_status
                 FROM trades
-                WHERE parentTradeId IS NULL
+                WHERE parentTradeId IS NULL ${acctAnd}
 
                 UNION ALL
 
@@ -67,7 +75,7 @@ router.get('/', (req, res) => {
                 COUNT(CASE WHEN final_status NOT IN ('Open', 'Rolled') AND chain_pnl > 0 THEN 1 END) as winning_chains,
                 COUNT(CASE WHEN final_status NOT IN ('Open', 'Rolled') THEN 1 END) as resolved_chains
             FROM chain_finals
-        `).get();
+        `).get(...acctParams);
 
         const winningChains = chainPnLStats.winning_chains || 0;
         const resolvedCount = chainPnLStats.resolved_chains || 0;
@@ -79,10 +87,10 @@ router.get('/', (req, res) => {
                 strftime('%Y-%m', COALESCE(closedDate, openedDate)) as month,
                 SUM((entryPrice - closePrice) * quantity * 100) as pnl
             FROM trades
-            WHERE status NOT IN ('Open', 'Rolled')
+            WHERE status NOT IN ('Open', 'Rolled') ${acctAnd}
             GROUP BY month
             ORDER BY month DESC
-        `).all();
+        `).all(...acctParams);
 
         // Ticker P/L aggregation
         const tickerStats = db.prepare(`
@@ -90,9 +98,10 @@ router.get('/', (req, res) => {
                 ticker,
                 SUM((entryPrice - closePrice) * quantity * 100) as pnl
             FROM trades
+            ${acctWhere}
             GROUP BY ticker
             ORDER BY pnl DESC
-        `).all();
+        `).all(...acctParams);
 
         // Best ticker
         const bestTicker = tickerStats.length > 0 ? tickerStats[0] : null;
@@ -105,8 +114,8 @@ router.get('/', (req, res) => {
                 ELSE 0 END
             ) as avgRoi
             FROM trades
-            WHERE status NOT IN ('Open', 'Rolled')
-        `).get();
+            WHERE status NOT IN ('Open', 'Rolled') ${acctAnd}
+        `).get(...acctParams);
 
         // Capital gains from positions
         const positionStats = db.prepare(`
@@ -115,7 +124,8 @@ router.get('/', (req, res) => {
                 COUNT(CASE WHEN soldDate IS NOT NULL THEN 1 END) as closedPositions,
                 COUNT(CASE WHEN soldDate IS NULL THEN 1 END) as openPositions
             FROM positions
-        `).get();
+            ${acctWhere}
+        `).get(...acctParams);
 
         // Convert all money values from cents to dollars
         apiResponse.success(res, {

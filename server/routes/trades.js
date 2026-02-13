@@ -40,10 +40,10 @@ router.post('/roll', (req, res) => {
                 WHERE id = ?
             `).run(toCents(closePrice), newTrade.openedDate, originalTradeId);
 
-            // Create new rolled trade
+            // Create new rolled trade (inherit accountId from original)
             const result = db.prepare(`
-                INSERT INTO trades (ticker, type, strike, quantity, delta, entryPrice, closePrice, openedDate, expirationDate, closedDate, status, parentTradeId, notes)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO trades (ticker, type, strike, quantity, delta, entryPrice, closePrice, openedDate, expirationDate, closedDate, status, parentTradeId, notes, accountId)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             `).run(
                 original.ticker,
                 newTrade.type || original.type,
@@ -57,7 +57,8 @@ router.post('/roll', (req, res) => {
                 newTrade.closedDate || null,
                 newTrade.status || 'Open',
                 originalTradeId,
-                newTrade.notes || null
+                newTrade.notes || null,
+                original.accountId
             );
 
             return result.lastInsertRowid;
@@ -75,20 +76,21 @@ router.post('/roll', (req, res) => {
 // POST bulk import trades - MUST be before /:id
 router.post('/import', (req, res) => {
     try {
-        const { trades } = req.body;
+        const { trades, accountId } = req.body;
 
         if (!Array.isArray(trades) || trades.length === 0) {
             return apiResponse.error(res, 'No trades provided', 400);
         }
 
         const stmt = db.prepare(`
-            INSERT INTO trades (ticker, type, strike, quantity, delta, entryPrice, closePrice, openedDate, expirationDate, closedDate, status, parentTradeId, notes)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO trades (ticker, type, strike, quantity, delta, entryPrice, closePrice, openedDate, expirationDate, closedDate, status, parentTradeId, notes, accountId)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `);
 
         const insertMany = db.transaction((trades) => {
             let imported = 0;
             const idMap = new Map(); // old ID → new ID
+            const assignedTrades = []; // track assigned trades for position creation
 
             // Insert trades in dependency order (parents before children)
             const remaining = [...trades];
@@ -104,6 +106,7 @@ router.post('/import', (req, res) => {
 
                     try {
                         const newParentId = oldParentId ? (idMap.get(oldParentId) || null) : null;
+                        const tradeAccountId = trade.accountId || accountId || null;
                         const result = stmt.run(
                             trade.ticker?.toUpperCase(),
                             trade.type,
@@ -117,14 +120,60 @@ router.post('/import', (req, res) => {
                             trade.closedDate || null,
                             trade.status || 'Open',
                             newParentId,
-                            trade.notes || null
+                            trade.notes || null,
+                            tradeAccountId
                         );
-                        if (trade.id) idMap.set(Number(trade.id), result.lastInsertRowid);
+                        const newId = result.lastInsertRowid;
+                        if (trade.id) idMap.set(Number(trade.id), newId);
+
+                        // Track assigned trades to create positions after all inserts
+                        if (trade.status === 'Assigned') {
+                            assignedTrades.push({
+                                id: newId,
+                                ticker: trade.ticker?.toUpperCase(),
+                                type: trade.type,
+                                strike: Number(trade.strike),
+                                entryPrice: Number(trade.entryPrice),
+                                quantity: trade.quantity || 1,
+                                closedDate: trade.closedDate,
+                                accountId: tradeAccountId
+                            });
+                        }
                         imported++;
                     } catch (e) {
                         console.error('Error importing trade:', e, trade);
                     }
                     remaining.splice(i, 1);
+                }
+            }
+
+            // Create positions for CSP Assigned trades, close positions for CC Assigned trades
+            for (const trade of assignedTrades) {
+                const shares = trade.quantity * 100;
+                const assignmentDate = trade.closedDate || new Date().toISOString().split('T')[0];
+
+                if (trade.type === 'CSP') {
+                    const adjustedCostBasis = trade.strike - trade.entryPrice;
+                    db.prepare(`
+                        INSERT INTO positions (ticker, shares, costBasis, acquiredDate, acquiredFromTradeId, accountId)
+                        VALUES (?, ?, ?, ?, ?, ?)
+                    `).run(trade.ticker, shares, toCents(adjustedCostBasis), assignmentDate, trade.id, trade.accountId);
+                } else if (trade.type === 'CC') {
+                    const openPosition = db.prepare(
+                        trade.accountId
+                            ? 'SELECT * FROM positions WHERE ticker = ? AND soldDate IS NULL AND accountId = ? ORDER BY acquiredDate ASC LIMIT 1'
+                            : 'SELECT * FROM positions WHERE ticker = ? AND soldDate IS NULL ORDER BY acquiredDate ASC LIMIT 1'
+                    ).get(...(trade.accountId ? [trade.ticker, trade.accountId] : [trade.ticker]));
+
+                    if (openPosition) {
+                        const costBasisDollars = toDollars(openPosition.costBasis);
+                        const capitalGainLoss = (trade.strike - costBasisDollars) * openPosition.shares;
+                        db.prepare(`
+                            UPDATE positions
+                            SET soldDate = ?, salePrice = ?, soldViaTradeId = ?, capitalGainLoss = ?, updatedAt = CURRENT_TIMESTAMP
+                            WHERE id = ?
+                        `).run(assignmentDate, toCents(trade.strike), trade.id, toCents(capitalGainLoss), openPosition.id);
+                    }
                 }
             }
 
@@ -147,6 +196,7 @@ router.get('/', (req, res) => {
             limit = 50,
             status,
             ticker,
+            accountId,
             sortBy = 'openedDate',
             sortDir = 'asc'
         } = req.query;
@@ -163,6 +213,11 @@ router.get('/', (req, res) => {
         // Build WHERE clause
         const conditions = [];
         const params = [];
+
+        if (accountId) {
+            conditions.push('accountId = ?');
+            params.push(Number(accountId));
+        }
 
         if (status && status !== 'all') {
             if (status === 'open') {
@@ -244,7 +299,8 @@ router.post('/', (req, res) => {
             closedDate,
             status,
             parentTradeId,
-            notes
+            notes,
+            accountId
         } = req.body;
 
         // Validate input
@@ -259,12 +315,15 @@ router.post('/', (req, res) => {
         // Auto-link CC to assigned CSP: If creating a CC for a ticker with an open position
         // from a CSP assignment, auto-link the CC to that CSP trade
         if (type === 'CC' && !parentTradeId) {
-            const openPosition = db.prepare(`
-                SELECT acquiredFromTradeId FROM positions
-                WHERE ticker = ? AND soldDate IS NULL AND acquiredFromTradeId IS NOT NULL
-                ORDER BY acquiredDate ASC
-                LIMIT 1
-            `).get(tickerUpper);
+            const positionQuery = accountId
+                ? `SELECT acquiredFromTradeId FROM positions
+                   WHERE ticker = ? AND soldDate IS NULL AND acquiredFromTradeId IS NOT NULL AND accountId = ?
+                   ORDER BY acquiredDate ASC LIMIT 1`
+                : `SELECT acquiredFromTradeId FROM positions
+                   WHERE ticker = ? AND soldDate IS NULL AND acquiredFromTradeId IS NOT NULL
+                   ORDER BY acquiredDate ASC LIMIT 1`;
+            const positionParams = accountId ? [tickerUpper, Number(accountId)] : [tickerUpper];
+            const openPosition = db.prepare(positionQuery).get(...positionParams);
 
             if (openPosition && openPosition.acquiredFromTradeId) {
                 resolvedParentTradeId = openPosition.acquiredFromTradeId;
@@ -273,8 +332,8 @@ router.post('/', (req, res) => {
         }
 
         const stmt = db.prepare(`
-      INSERT INTO trades (ticker, type, strike, quantity, delta, entryPrice, closePrice, openedDate, expirationDate, closedDate, status, parentTradeId, notes)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO trades (ticker, type, strike, quantity, delta, entryPrice, closePrice, openedDate, expirationDate, closedDate, status, parentTradeId, notes, accountId)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
         const result = stmt.run(
@@ -290,7 +349,8 @@ router.post('/', (req, res) => {
             closedDate || null,
             status || 'Open',
             resolvedParentTradeId,
-            notes || null
+            notes || null,
+            accountId || null
         );
 
         const newTrade = db.prepare('SELECT * FROM trades WHERE id = ?').get(result.lastInsertRowid);
@@ -372,18 +432,17 @@ router.put('/:id', (req, res) => {
                 // CSP Assigned: Create new position (cost basis = strike - premium collected)
                 const adjustedCostBasis = strike - entryPrice; // in dollars
                 db.prepare(`
-                    INSERT INTO positions (ticker, shares, costBasis, acquiredDate, acquiredFromTradeId)
-                    VALUES (?, ?, ?, ?, ?)
-                `).run(tickerUpper, shares, toCents(adjustedCostBasis), assignmentDate, req.params.id);
+                    INSERT INTO positions (ticker, shares, costBasis, acquiredDate, acquiredFromTradeId, accountId)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                `).run(tickerUpper, shares, toCents(adjustedCostBasis), assignmentDate, req.params.id, currentTrade.accountId);
                 console.log(`📈 Position created: ${shares} shares of ${tickerUpper} at $${adjustedCostBasis.toFixed(2)} (strike $${strike} - premium $${entryPrice})`);
             } else if (type === 'CC') {
-                // CC Assigned: Close oldest open position (FIFO)
-                const openPosition = db.prepare(`
-                    SELECT * FROM positions
-                    WHERE ticker = ? AND soldDate IS NULL
-                    ORDER BY acquiredDate ASC
-                    LIMIT 1
-                `).get(tickerUpper);
+                // CC Assigned: Close oldest open position (FIFO), scoped to same account
+                const ccPositionQuery = currentTrade.accountId
+                    ? 'SELECT * FROM positions WHERE ticker = ? AND soldDate IS NULL AND accountId = ? ORDER BY acquiredDate ASC LIMIT 1'
+                    : 'SELECT * FROM positions WHERE ticker = ? AND soldDate IS NULL ORDER BY acquiredDate ASC LIMIT 1';
+                const ccPositionParams = currentTrade.accountId ? [tickerUpper, currentTrade.accountId] : [tickerUpper];
+                const openPosition = db.prepare(ccPositionQuery).get(...ccPositionParams);
 
                 if (openPosition) {
                     // openPosition.costBasis is in cents, convert to dollars for calculation

@@ -1,15 +1,18 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { tradesApi } from '../services/api';
 
-export const useTrades = () => {
+export const useTrades = (accountId) => {
     const [trades, setTrades] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
+    const prevAccountId = useRef(accountId);
 
     const fetchTrades = useCallback(async () => {
         try {
             setLoading(true);
-            const response = await tradesApi.getAll({ limit: 1000 });
+            const params = { limit: 1000 };
+            if (accountId) params.accountId = accountId;
+            const response = await tradesApi.getAll(params);
             setTrades(response.data);
             setError(null);
         } catch (err) {
@@ -18,11 +21,19 @@ export const useTrades = () => {
         } finally {
             setLoading(false);
         }
-    }, []);
+    }, [accountId]);
 
     useEffect(() => {
         fetchTrades();
     }, [fetchTrades]);
+
+    // Re-fetch when account changes
+    useEffect(() => {
+        if (prevAccountId.current !== accountId) {
+            prevAccountId.current = accountId;
+            fetchTrades();
+        }
+    }, [accountId, fetchTrades]);
 
     return {
         trades,

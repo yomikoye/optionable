@@ -2,7 +2,7 @@ import { useState, useMemo, useCallback, useEffect } from 'react';
 import { API_URL } from '../utils/constants';
 import { calculateMetrics } from '../utils/calculations';
 
-export const useStats = (trades) => {
+export const useStats = (trades, accountId) => {
     const [capitalGainsStats, setCapitalGainsStats] = useState({
         realizedCapitalGL: 0,
         openPositions: 0,
@@ -12,7 +12,8 @@ export const useStats = (trades) => {
 
     const fetchCapitalGainsStats = useCallback(async () => {
         try {
-            const response = await fetch(`${API_URL}/stats`);
+            const params = accountId ? `?accountId=${accountId}` : '';
+            const response = await fetch(`${API_URL}/stats${params}`);
             if (!response.ok) return;
             const json = await response.json();
             setCapitalGainsStats({
@@ -23,7 +24,7 @@ export const useStats = (trades) => {
         } catch (err) {
             console.error('Error fetching capital gains stats:', err);
         }
-    }, []);
+    }, [accountId]);
 
     useEffect(() => {
         fetchCapitalGainsStats();

@@ -188,6 +188,7 @@ const migrations = [
     {
         version: 7,
         description: 'Prices to INTEGER cents',
+
         up: () => {
             // Skip if already migrated via settings
             const alreadyDone = db.prepare('SELECT value FROM settings WHERE key = ?').get('cents_migration_v1');
@@ -264,6 +265,83 @@ const migrations = [
                 CREATE INDEX idx_positions_acquiredFromTradeId ON positions(acquiredFromTradeId);
             `);
             db.prepare('INSERT INTO settings (key, value) VALUES (?, ?)').run('cents_migration_v1', 'true');
+        }
+    },
+    {
+        version: 8,
+        description: 'Multi-account support',
+        up: () => {
+            db.exec(`
+                CREATE TABLE accounts (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL CHECK(length(name) > 0),
+                    createdAt TEXT DEFAULT CURRENT_TIMESTAMP,
+                    updatedAt TEXT DEFAULT CURRENT_TIMESTAMP
+                )
+            `);
+
+            // Add accountId to existing tables (nullable for ALTER TABLE compat)
+            db.exec(`
+                ALTER TABLE trades ADD COLUMN accountId INTEGER REFERENCES accounts(id) ON DELETE RESTRICT;
+                ALTER TABLE positions ADD COLUMN accountId INTEGER REFERENCES accounts(id) ON DELETE RESTRICT;
+            `);
+            db.exec(`
+                CREATE INDEX idx_trades_accountId ON trades(accountId);
+                CREATE INDEX idx_positions_accountId ON positions(accountId);
+            `);
+
+            // Backfill: create default account, assign all existing data
+            db.prepare(`INSERT INTO accounts (name) VALUES (?)`).run('Default');
+            const defaultAccount = db.prepare('SELECT id FROM accounts ORDER BY id LIMIT 1').get();
+            db.prepare('UPDATE trades SET accountId = ?').run(defaultAccount.id);
+            db.prepare('UPDATE positions SET accountId = ?').run(defaultAccount.id);
+
+            // Portfolio mode setting
+            db.prepare(`INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)`).run('portfolio_mode_enabled', 'false');
+        }
+    },
+    {
+        version: 9,
+        description: 'Fund transactions table',
+        up: () => {
+            db.exec(`
+                CREATE TABLE fund_transactions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    accountId INTEGER NOT NULL REFERENCES accounts(id) ON DELETE RESTRICT,
+                    type TEXT NOT NULL CHECK(type IN ('deposit','withdrawal','dividend','interest','fee')),
+                    amount INTEGER NOT NULL CHECK(amount > 0),
+                    date TEXT NOT NULL,
+                    description TEXT,
+                    createdAt TEXT DEFAULT CURRENT_TIMESTAMP,
+                    updatedAt TEXT DEFAULT CURRENT_TIMESTAMP
+                );
+                CREATE INDEX idx_fund_transactions_accountId ON fund_transactions(accountId);
+                CREATE INDEX idx_fund_transactions_date ON fund_transactions(date);
+            `);
+        }
+    },
+    {
+        version: 10,
+        description: 'Manual stocks table',
+        up: () => {
+            db.exec(`
+                CREATE TABLE stocks (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    accountId INTEGER NOT NULL REFERENCES accounts(id) ON DELETE RESTRICT,
+                    ticker TEXT NOT NULL CHECK(length(ticker) > 0),
+                    shares INTEGER NOT NULL CHECK(shares >= 1),
+                    costBasis INTEGER NOT NULL CHECK(costBasis >= 0),
+                    acquiredDate TEXT NOT NULL,
+                    soldDate TEXT,
+                    salePrice INTEGER CHECK(salePrice IS NULL OR salePrice >= 0),
+                    capitalGainLoss INTEGER,
+                    notes TEXT,
+                    createdAt TEXT DEFAULT CURRENT_TIMESTAMP,
+                    updatedAt TEXT DEFAULT CURRENT_TIMESTAMP
+                );
+                CREATE INDEX idx_stocks_accountId ON stocks(accountId);
+                CREATE INDEX idx_stocks_ticker ON stocks(ticker);
+            `);
         }
     }
 ];
