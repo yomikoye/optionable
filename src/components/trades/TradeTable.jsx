@@ -240,7 +240,7 @@ export const TradeTable = ({
 
             {/* Table */}
             <div className="overflow-x-auto">
-                <table className="w-full text-sm text-left">
+                <table className="w-full text-sm text-left [&_th]:border-r [&_th]:border-slate-200 [&_th:last-child]:border-r-0 [&_td]:border-r [&_td]:border-slate-100 [&_td:last-child]:border-r-0 dark:[&_th]:border-slate-600 dark:[&_td]:border-slate-700">
                     <thead className="text-xs text-slate-500 dark:text-slate-400 uppercase bg-slate-50 dark:bg-slate-800 border-b border-slate-100 dark:border-slate-700">
                         <tr>
                             <th className="px-3 py-2 w-[12%] font-semibold text-center cursor-pointer hover:text-slate-700 dark:hover:text-slate-200" onClick={() => handleSort('ticker')}>
@@ -370,16 +370,10 @@ export const TradeTable = ({
                                             <td className={`px-3 py-2 text-center font-mono text-sm ${chain.chainRoi >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-500 dark:text-red-400'}`}>
                                                 {formatPercent(chain.chainRoi)}
                                             </td>
-                                            <td className="px-3 py-2 text-center">
-                                                <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
-                                                    chain.finalStatus === 'Open' ? 'bg-amber-50 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 ring-1 ring-inset ring-amber-600/20' :
-                                                    chain.finalStatus === 'Assigned' ? 'bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-300 ring-1 ring-inset ring-slate-600/20' :
-                                                    chain.finalStatus === 'Expired' ? 'bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 ring-1 ring-inset ring-emerald-600/20' :
-                                                    chain.finalStatus === 'Rolled' ? 'bg-slate-50 dark:bg-slate-700/50 text-slate-600 dark:text-slate-400 ring-1 ring-inset ring-slate-500/20' :
-                                                    'bg-slate-50 dark:bg-slate-700/50 text-slate-500 dark:text-slate-400'
-                                                }`}>
-                                                    {chain.finalStatus}
-                                                </span>
+                                            <td className={`px-3 py-2 text-center text-xs font-medium ${
+                                                chain.finalStatus === 'Open' ? 'text-amber-700 dark:text-amber-400' : 'text-slate-500 dark:text-slate-400'
+                                            }`}>
+                                                {chain.finalStatus}
                                             </td>
                                             <td className="px-3 py-2 text-right">
                                                 <div className="flex justify-end gap-1">
@@ -502,16 +496,10 @@ export const TradeTable = ({
                                                     <td className={`px-3 py-2 text-center font-mono text-sm ${metrics.roi >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-500 dark:text-red-400'}`}>
                                                         {formatPercent(metrics.roi)}
                                                     </td>
-                                                    <td className="px-3 py-2 text-center">
-                                                        <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
-                                                            trade.status === 'Open' ? 'bg-amber-50 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400' :
-                                                            trade.status === 'Assigned' ? 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-400' :
-                                                            trade.status === 'Expired' ? 'bg-emerald-50 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400' :
-                                                            trade.status === 'Rolled' ? 'bg-slate-50 dark:bg-slate-700/50 text-slate-500' :
-                                                            'bg-slate-50 dark:bg-slate-700/50 text-slate-400'
-                                                        }`}>
-                                                            {trade.status}
-                                                        </span>
+                                                    <td className={`px-3 py-2 text-center text-xs font-medium ${
+                                                        trade.status === 'Open' ? 'text-amber-700 dark:text-amber-400' : 'text-slate-500 dark:text-slate-400'
+                                                    }`}>
+                                                        {trade.status}
                                                     </td>
                                                     <td className="px-3 py-2 text-center">
                                                         <div className="flex justify-center gap-1">
