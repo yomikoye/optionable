@@ -1,5 +1,23 @@
 # Changelog
 
+## v0.12.0
+
+### Configurable Pagination
+- **Trades per page setting** — New option in Settings modal to choose how many trade chains display per page (5, 10, 25, 50, or Show All)
+- **Persistent preference** — Setting stored in database and synced across sessions
+- **DB migration v11** — Added `trades_per_page` key to settings table
+
+### Trade Table UI
+- **Smart expiry column** — Shows closed/rolled date for completed trades instead of expiry date
+- **Centered column layout** — Standardized column widths with consistent alignment
+- **Vertical column dividers** — Added subtle column separators for improved readability
+- **Simplified status styling** — Cleaner status column with consistent text colors across root and child chain rows
+
+### Bug Fixes
+- **Account picker in modals** — Fixed account picker in all modals (Trade, Fund Transaction, Stock) when viewing "All Accounts"
+
+---
+
 ## v0.11.1
 
 ### Bug Fixes

@@ -4,7 +4,7 @@
 
 Wheel Strategy Tracker for Cash Secured Puts (CSPs) and Covered Calls (CCs) with multi-account support and portfolio management. Self-hosted, local-first app with SQLite storage. Only external dependency is optional live stock prices via [stockprices.dev](https://stockprices.dev).
 
-**Current Version:** 0.11.1
+**Current Version:** 0.12.0
 **Docker:** `yomikoye/optionable:latest`
 
 ---
