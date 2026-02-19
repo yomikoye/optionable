@@ -121,7 +121,14 @@ export default function App() {
     }, []);
 
     const portfolioModeEnabled = appSettings.portfolio_mode_enabled === 'true';
+    const paginationEnabled = appSettings.pagination_enabled !== 'false';
+    const tradesPerPage = paginationEnabled ? (parseInt(appSettings.trades_per_page) || 5) : null;
     const isPortfolioTab = portfolioModeEnabled && activeTab === 'portfolio';
+
+    // Reset to page 1 when tradesPerPage changes
+    useEffect(() => {
+        setCurrentPage(1);
+    }, [tradesPerPage, setCurrentPage]);
 
     // Keyboard shortcuts
     const anyModalOpen = tradeForm.isModalOpen || showSettings || showHelp;
@@ -236,6 +243,7 @@ export default function App() {
                             setSortConfig={setSortConfig}
                             currentPage={currentPage}
                             setCurrentPage={setCurrentPage}
+                            tradesPerPage={tradesPerPage}
                             onQuickClose={tradeForm.quickCloseTrade}
                             onRoll={tradeForm.rollTrade}
                             onEdit={tradeForm.openModal}

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Settings, X, Wifi, WifiOff, ShieldCheck, ShieldOff, Briefcase, BriefcaseIcon, Sun, Moon, Plus, Pencil, Trash2, Check, HelpCircle } from 'lucide-react';
+import { Settings, X, Wifi, WifiOff, ShieldCheck, ShieldOff, Briefcase, BriefcaseIcon, Sun, Moon, Plus, Pencil, Trash2, Check, HelpCircle, List } from 'lucide-react';
 
 const WELCOME_STORAGE_KEY = 'optionable_welcome_dismissed';
 
@@ -104,6 +104,12 @@ export const SettingsModal = ({ onClose, showToast, accounts, onCreateAccount, o
     const livePricesEnabled = settings.live_prices_enabled === 'true';
     const confirmExpireEnabled = settings.confirm_expire_enabled !== 'false'; // Default true
     const portfolioModeEnabled = settings.portfolio_mode_enabled === 'true';
+    const paginationEnabled = settings.pagination_enabled !== 'false';
+    const [tradesPerPageInput, setTradesPerPageInput] = useState(settings.trades_per_page || '5');
+
+    useEffect(() => {
+        setTradesPerPageInput(settings.trades_per_page || '5');
+    }, [settings.trades_per_page]);
 
     if (loading) {
         return (
@@ -259,6 +265,57 @@ export const SettingsModal = ({ onClose, showToast, accounts, onCreateAccount, o
                                 }`}
                             />
                         </button>
+                    </div>
+
+                    {/* Paginate Trades Toggle */}
+                    <div className="bg-slate-50 dark:bg-slate-700/50 rounded-lg">
+                        <div className="flex items-center justify-between p-4">
+                            <div className="flex items-center gap-3">
+                                <List className={`w-5 h-5 ${paginationEnabled ? 'text-indigo-600 dark:text-indigo-400' : 'text-slate-400'}`} />
+                                <div>
+                                    <p className="font-medium text-slate-900 dark:text-white">Paginate Trades</p>
+                                    <p className="text-sm text-slate-500 dark:text-slate-400">
+                                        Split trade log into pages
+                                    </p>
+                                </div>
+                            </div>
+                            <button
+                                onClick={() => updateSetting('pagination_enabled', paginationEnabled ? 'false' : 'true')}
+                                disabled={saving}
+                                className={`relative shrink-0 w-11 h-6 rounded-full transition-colors ${
+                                    paginationEnabled
+                                        ? 'bg-indigo-500'
+                                        : 'bg-slate-300 dark:bg-slate-600'
+                                }`}
+                            >
+                                <span
+                                    className={`absolute top-1 left-1 w-4 h-4 bg-white rounded-full shadow transition-transform ${
+                                        paginationEnabled ? 'translate-x-5' : 'translate-x-0'
+                                    }`}
+                                />
+                            </button>
+                        </div>
+                        {paginationEnabled && (
+                            <div className="px-4 pb-4 pt-0">
+                                <div className="flex items-center gap-3 pl-8">
+                                    <label className="text-sm text-slate-600 dark:text-slate-300 whitespace-nowrap">Trades per page</label>
+                                    <input
+                                        type="number"
+                                        min="1"
+                                        max="100"
+                                        value={tradesPerPageInput}
+                                        onChange={(e) => setTradesPerPageInput(e.target.value)}
+                                        onBlur={() => {
+                                            const val = Math.max(1, Math.min(100, parseInt(tradesPerPageInput) || 5));
+                                            setTradesPerPageInput(String(val));
+                                            updateSetting('trades_per_page', String(val));
+                                        }}
+                                        onKeyDown={(e) => e.key === 'Enter' && e.target.blur()}
+                                        className="w-20 px-2 py-1 text-sm rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                                    />
+                                </div>
+                            </div>
+                        )}
                     </div>
 
                     {/* Show Help on Startup Toggle */}

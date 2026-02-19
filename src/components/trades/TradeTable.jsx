@@ -17,7 +17,6 @@ import {
 } from 'lucide-react';
 import { formatDateShort, formatCurrency, formatPercent } from '../../utils/formatters';
 import { calculateDTE, calculateMetrics } from '../../utils/calculations';
-import { TRADES_PER_PAGE } from '../../utils/constants';
 
 const STATUS_TABS = [
     { key: 'all', label: 'All' },
@@ -34,6 +33,7 @@ export const TradeTable = ({
     setSortConfig,
     currentPage,
     setCurrentPage,
+    tradesPerPage = 5,
     onQuickClose,
     onRoll,
     onEdit,
@@ -160,11 +160,10 @@ export const TradeTable = ({
     }, [filteredAndSortedTrades]);
 
     // Paginate chains
-    const totalChainPages = Math.ceil(chainedTrades.length / TRADES_PER_PAGE);
-    const paginatedChains = chainedTrades.slice(
-        (currentPage - 1) * TRADES_PER_PAGE,
-        currentPage * TRADES_PER_PAGE
-    );
+    const showAll = tradesPerPage === null;
+    const totalChainPages = showAll ? 1 : Math.ceil(chainedTrades.length / tradesPerPage);
+    const paginatedChains = showAll ? chainedTrades
+        : chainedTrades.slice((currentPage - 1) * tradesPerPage, currentPage * tradesPerPage);
 
     const toggleChain = (chainId) => {
         setExpandedChains(prev => {
@@ -541,7 +540,7 @@ export const TradeTable = ({
             {totalChainPages > 1 && (
                 <div className="p-4 border-t border-slate-100 dark:border-slate-700 flex items-center justify-between bg-slate-50/50 dark:bg-slate-800/50">
                     <div className="text-sm text-slate-500 dark:text-slate-400">
-                        Showing {((currentPage - 1) * TRADES_PER_PAGE) + 1} - {Math.min(currentPage * TRADES_PER_PAGE, chainedTrades.length)} of {chainedTrades.length} chains
+                        Showing {((currentPage - 1) * tradesPerPage) + 1} - {Math.min(currentPage * tradesPerPage, chainedTrades.length)} of {chainedTrades.length} chains
                     </div>
                     <div className="flex items-center gap-2">
                         <button
