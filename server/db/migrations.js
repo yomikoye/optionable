@@ -343,6 +343,14 @@ const migrations = [
                 CREATE INDEX idx_stocks_ticker ON stocks(ticker);
             `);
         }
+    },
+    {
+        version: 11,
+        description: 'Pagination settings',
+        up: () => {
+            db.prepare(`INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)`).run('pagination_enabled', 'true');
+            db.prepare(`INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)`).run('trades_per_page', '5');
+        }
     }
 ];
 

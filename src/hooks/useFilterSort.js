@@ -1,5 +1,4 @@
-import { useState, useMemo, useEffect } from 'react';
-import { TRADES_PER_PAGE } from '../utils/constants';
+import { useState, useMemo } from 'react';
 import { calculateMetrics, calculateDaysHeld } from '../utils/calculations';
 
 export const useFilterSort = (trades) => {
@@ -60,20 +59,6 @@ export const useFilterSort = (trades) => {
         return result;
     }, [trades, statusFilter, sortConfig]);
 
-    // Pagination
-    const totalPages = Math.ceil(filteredAndSortedTrades.length / TRADES_PER_PAGE);
-    const paginatedTrades = useMemo(() => {
-        const startIndex = (currentPage - 1) * TRADES_PER_PAGE;
-        return filteredAndSortedTrades.slice(startIndex, startIndex + TRADES_PER_PAGE);
-    }, [filteredAndSortedTrades, currentPage]);
-
-    // Reset to last valid page when trades change
-    useEffect(() => {
-        if (currentPage > totalPages && totalPages > 0) {
-            setCurrentPage(totalPages);
-        }
-    }, [totalPages, currentPage]);
-
     return {
         statusFilter,
         setStatusFilter,
@@ -81,8 +66,6 @@ export const useFilterSort = (trades) => {
         setSortConfig,
         currentPage,
         setCurrentPage,
-        filteredAndSortedTrades,
-        paginatedTrades,
-        totalPages
+        filteredAndSortedTrades
     };
 };
