@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { db } from '../db/connection.js';
+import { db, dbPath } from '../db/connection.js';
 import { apiResponse } from '../utils/response.js';
 
 const router = Router();
@@ -31,6 +31,18 @@ router.put('/:key', (req, res) => {
     } catch (error) {
         console.error('Error updating setting:', error);
         apiResponse.error(res, 'Failed to update setting');
+    }
+});
+
+// GET export database
+router.get('/export-db', (req, res) => {
+    try {
+        db.pragma('wal_checkpoint(TRUNCATE)');
+        const timestamp = new Date().toISOString().slice(0, 10);
+        res.download(dbPath, `optionable-${timestamp}.db`);
+    } catch (error) {
+        console.error('Error exporting database:', error);
+        apiResponse.error(res, 'Failed to export database');
     }
 });
 

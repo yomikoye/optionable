@@ -123,6 +123,16 @@ const migrations = [
         version: 6,
         description: 'Data integrity constraints',
         up: () => {
+            // Ensure settings table exists (may not if legacy DB predates v4)
+            db.exec(`
+                CREATE TABLE IF NOT EXISTS settings (
+                    key TEXT PRIMARY KEY,
+                    value TEXT NOT NULL,
+                    updatedAt TEXT DEFAULT CURRENT_TIMESTAMP
+                )
+            `);
+            db.prepare(`INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)`).run('live_prices_enabled', 'true');
+
             // Skip if already migrated via settings
             const alreadyDone = db.prepare('SELECT value FROM settings WHERE key = ?').get('integrity_migration_v1');
             if (alreadyDone) return;

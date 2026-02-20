@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Settings, X, Wifi, WifiOff, ShieldCheck, ShieldOff, Briefcase, BriefcaseIcon, Sun, Moon, Plus, Pencil, Trash2, Check, HelpCircle, List } from 'lucide-react';
+import { Settings, X, ShieldCheck, Briefcase, Sun, Moon, Plus, Pencil, Trash2, Check, HelpCircle, List, Download } from 'lucide-react';
 
 const WELCOME_STORAGE_KEY = 'optionable_welcome_dismissed';
 
@@ -101,7 +101,6 @@ export const SettingsModal = ({ onClose, showToast, accounts, onCreateAccount, o
         }
     };
 
-    const livePricesEnabled = settings.live_prices_enabled === 'true';
     const confirmExpireEnabled = settings.confirm_expire_enabled !== 'false'; // Default true
     const portfolioModeEnabled = settings.portfolio_mode_enabled === 'true';
     const paginationEnabled = settings.pagination_enabled !== 'false';
@@ -140,77 +139,10 @@ export const SettingsModal = ({ onClose, showToast, accounts, onCreateAccount, o
 
                 {/* Settings List */}
                 <div className="p-4 space-y-4 overflow-y-auto">
-                    {/* Dark Mode Toggle */}
-                    <div className="flex items-center justify-between p-4 bg-slate-50 dark:bg-slate-700/50 rounded-lg">
-                        <div className="flex items-center gap-3">
-                            {darkMode ? (
-                                <Moon className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
-                            ) : (
-                                <Sun className="w-5 h-5 text-amber-500" />
-                            )}
-                            <div>
-                                <p className="font-medium text-slate-900 dark:text-white">Dark Mode</p>
-                                <p className="text-sm text-slate-500 dark:text-slate-400">
-                                    {darkMode ? 'Dark theme active' : 'Light theme active'}
-                                </p>
-                            </div>
-                        </div>
-                        <button
-                            onClick={onToggleTheme}
-                            className={`relative shrink-0 w-11 h-6 rounded-full transition-colors ${
-                                darkMode
-                                    ? 'bg-indigo-500'
-                                    : 'bg-slate-300 dark:bg-slate-600'
-                            }`}
-                        >
-                            <span
-                                className={`absolute top-1 left-1 w-4 h-4 bg-white rounded-full shadow transition-transform ${
-                                    darkMode ? 'translate-x-5' : 'translate-x-0'
-                                }`}
-                            />
-                        </button>
-                    </div>
-
-                    {/* Live Stock Prices Toggle */}
-                    <div className="flex items-center justify-between p-4 bg-slate-50 dark:bg-slate-700/50 rounded-lg">
-                        <div className="flex items-center gap-3">
-                            {livePricesEnabled ? (
-                                <Wifi className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
-                            ) : (
-                                <WifiOff className="w-5 h-5 text-slate-400" />
-                            )}
-                            <div>
-                                <p className="font-medium text-slate-900 dark:text-white">Live Stock Prices</p>
-                                <p className="text-sm text-slate-500 dark:text-slate-400">
-                                    Fetch real time price
-                                </p>
-                            </div>
-                        </div>
-                        <button
-                            onClick={() => updateSetting('live_prices_enabled', livePricesEnabled ? 'false' : 'true')}
-                            disabled={saving}
-                            className={`relative shrink-0 w-11 h-6 rounded-full transition-colors ${
-                                livePricesEnabled
-                                    ? 'bg-emerald-500'
-                                    : 'bg-slate-300 dark:bg-slate-600'
-                            }`}
-                        >
-                            <span
-                                className={`absolute top-1 left-1 w-4 h-4 bg-white rounded-full shadow transition-transform ${
-                                    livePricesEnabled ? 'translate-x-5' : 'translate-x-0'
-                                }`}
-                            />
-                        </button>
-                    </div>
-
                     {/* Confirm Expire Toggle */}
                     <div className="flex items-center justify-between p-4 bg-slate-50 dark:bg-slate-700/50 rounded-lg">
                         <div className="flex items-center gap-3">
-                            {confirmExpireEnabled ? (
-                                <ShieldCheck className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
-                            ) : (
-                                <ShieldOff className="w-5 h-5 text-slate-400" />
-                            )}
+                            <ShieldCheck className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
                             <div>
                                 <p className="font-medium text-slate-900 dark:text-white">Confirm Expiry</p>
                                 <p className="text-sm text-slate-500 dark:text-slate-400">
@@ -235,33 +167,32 @@ export const SettingsModal = ({ onClose, showToast, accounts, onCreateAccount, o
                         </button>
                     </div>
 
-                    {/* Portfolio Mode Toggle */}
+                    {/* Dark Mode Toggle */}
                     <div className="flex items-center justify-between p-4 bg-slate-50 dark:bg-slate-700/50 rounded-lg">
                         <div className="flex items-center gap-3">
-                            {portfolioModeEnabled ? (
-                                <Briefcase className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
+                            {darkMode ? (
+                                <Moon className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
                             ) : (
-                                <BriefcaseIcon className="w-5 h-5 text-slate-400" />
+                                <Sun className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
                             )}
                             <div>
-                                <p className="font-medium text-slate-900 dark:text-white">Portfolio Mode</p>
+                                <p className="font-medium text-slate-900 dark:text-white">Dark Mode</p>
                                 <p className="text-sm text-slate-500 dark:text-slate-400">
-                                    Track cash flow, stocks, and portfolio performance
+                                    {darkMode ? 'Dark theme active' : 'Light theme active'}
                                 </p>
                             </div>
                         </div>
                         <button
-                            onClick={() => updateSetting('portfolio_mode_enabled', portfolioModeEnabled ? 'false' : 'true')}
-                            disabled={saving}
+                            onClick={onToggleTheme}
                             className={`relative shrink-0 w-11 h-6 rounded-full transition-colors ${
-                                portfolioModeEnabled
+                                darkMode
                                     ? 'bg-indigo-500'
                                     : 'bg-slate-300 dark:bg-slate-600'
                             }`}
                         >
                             <span
                                 className={`absolute top-1 left-1 w-4 h-4 bg-white rounded-full shadow transition-transform ${
-                                    portfolioModeEnabled ? 'translate-x-5' : 'translate-x-0'
+                                    darkMode ? 'translate-x-5' : 'translate-x-0'
                                 }`}
                             />
                         </button>
@@ -271,7 +202,7 @@ export const SettingsModal = ({ onClose, showToast, accounts, onCreateAccount, o
                     <div className="bg-slate-50 dark:bg-slate-700/50 rounded-lg">
                         <div className="flex items-center justify-between p-4">
                             <div className="flex items-center gap-3">
-                                <List className={`w-5 h-5 ${paginationEnabled ? 'text-indigo-600 dark:text-indigo-400' : 'text-slate-400'}`} />
+                                <List className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
                                 <div>
                                     <p className="font-medium text-slate-900 dark:text-white">Paginate Trades</p>
                                     <p className="text-sm text-slate-500 dark:text-slate-400">
@@ -318,10 +249,38 @@ export const SettingsModal = ({ onClose, showToast, accounts, onCreateAccount, o
                         )}
                     </div>
 
+                    {/* Portfolio Mode Toggle */}
+                    <div className="flex items-center justify-between p-4 bg-slate-50 dark:bg-slate-700/50 rounded-lg">
+                        <div className="flex items-center gap-3">
+                            <Briefcase className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
+                            <div>
+                                <p className="font-medium text-slate-900 dark:text-white">Portfolio Mode</p>
+                                <p className="text-sm text-slate-500 dark:text-slate-400">
+                                    Track cash flow, stocks, and portfolio
+                                </p>
+                            </div>
+                        </div>
+                        <button
+                            onClick={() => updateSetting('portfolio_mode_enabled', portfolioModeEnabled ? 'false' : 'true')}
+                            disabled={saving}
+                            className={`relative shrink-0 w-11 h-6 rounded-full transition-colors ${
+                                portfolioModeEnabled
+                                    ? 'bg-indigo-500'
+                                    : 'bg-slate-300 dark:bg-slate-600'
+                            }`}
+                        >
+                            <span
+                                className={`absolute top-1 left-1 w-4 h-4 bg-white rounded-full shadow transition-transform ${
+                                    portfolioModeEnabled ? 'translate-x-5' : 'translate-x-0'
+                                }`}
+                            />
+                        </button>
+                    </div>
+
                     {/* Show Help on Startup Toggle */}
                     <div className="flex items-center justify-between p-4 bg-slate-50 dark:bg-slate-700/50 rounded-lg">
                         <div className="flex items-center gap-3">
-                            <HelpCircle className={`w-5 h-5 ${showHelpOnStartup ? 'text-indigo-600 dark:text-indigo-400' : 'text-slate-400'}`} />
+                            <HelpCircle className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
                             <div>
                                 <p className="font-medium text-slate-900 dark:text-white">Show Help on Startup</p>
                                 <p className="text-sm text-slate-500 dark:text-slate-400">
@@ -345,12 +304,42 @@ export const SettingsModal = ({ onClose, showToast, accounts, onCreateAccount, o
                         </button>
                     </div>
 
+                    <hr className="border-slate-200 dark:border-slate-700" />
+
+                    {/* Export Database */}
+                    <div className="flex items-center justify-between p-4 bg-slate-50 dark:bg-slate-700/50 rounded-lg">
+                        <div className="flex items-center gap-3">
+                            <Download className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
+                            <div>
+                                <p className="font-medium text-slate-900 dark:text-white">Export Database</p>
+                                <p className="text-sm text-slate-500 dark:text-slate-400">
+                                    Download a backup of your data
+                                </p>
+                            </div>
+                        </div>
+                        <button
+                            onClick={() => {
+                                const a = document.createElement('a');
+                                a.href = `${API_URL}/api/settings/export-db`;
+                                a.download = '';
+                                a.click();
+                            }}
+                            className="px-3 py-1.5 text-sm bg-indigo-600 hover:bg-indigo-700 dark:bg-indigo-500 dark:hover:bg-indigo-600 text-white rounded-lg font-medium transition-colors"
+                        >
+                            Export
+                        </button>
+                    </div>
+
+                    <hr className="border-slate-200 dark:border-slate-700" />
+
                     {/* Accounts Management */}
-                    <div className="bg-slate-50 dark:bg-slate-700/50 rounded-lg p-4">
-                        <p className="font-medium text-slate-900 dark:text-white mb-3">Accounts</p>
-                        <div className="space-y-2">
+                    <div className="bg-slate-50 dark:bg-slate-700/50 rounded-lg overflow-hidden">
+                        <div className="px-4 py-3 border-b border-slate-200 dark:border-slate-600">
+                            <p className="font-semibold text-sm text-slate-900 dark:text-white text-center uppercase tracking-wide">Accounts</p>
+                        </div>
+                        <div className="p-4 space-y-2">
                             {accounts && accounts.map(account => (
-                                <div key={account.id} className="flex items-center gap-2">
+                                <div key={account.id} className="flex items-center gap-2 px-3 py-2 bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-600">
                                     {editingAccountId === account.id ? (
                                         <>
                                             <input
@@ -376,17 +365,17 @@ export const SettingsModal = ({ onClose, showToast, accounts, onCreateAccount, o
                                         </>
                                     ) : (
                                         <>
-                                            <span className="flex-1 text-sm text-slate-700 dark:text-slate-300">{account.name}</span>
+                                            <span className="flex-1 text-sm font-medium text-slate-700 dark:text-slate-300">{account.name}</span>
                                             <button
                                                 onClick={() => { setEditingAccountId(account.id); setEditingAccountName(account.name); }}
-                                                className="p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-600 rounded"
+                                                className="p-1.5 text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 rounded transition-colors"
                                                 title="Rename"
                                             >
                                                 <Pencil className="w-3.5 h-3.5" />
                                             </button>
                                             <button
                                                 onClick={() => handleDeleteAccount(account.id)}
-                                                className="p-1 text-slate-400 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30 rounded"
+                                                className="p-1.5 text-slate-400 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30 rounded transition-colors"
                                                 title="Delete"
                                             >
                                                 <Trash2 className="w-3.5 h-3.5" />
@@ -396,31 +385,26 @@ export const SettingsModal = ({ onClose, showToast, accounts, onCreateAccount, o
                                 </div>
                             ))}
                         </div>
-                        <div className="flex items-center gap-2 mt-3">
-                            <input
-                                type="text"
-                                value={newAccountName}
-                                onChange={(e) => setNewAccountName(e.target.value)}
-                                onKeyDown={(e) => e.key === 'Enter' && handleAddAccount()}
-                                placeholder="New account name"
-                                className="flex-1 px-2 py-1 text-sm rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                            />
-                            <button
-                                onClick={handleAddAccount}
-                                disabled={!newAccountName.trim()}
-                                className="flex items-center gap-1 px-2 py-1 text-sm bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-300 dark:disabled:bg-slate-600 text-white rounded transition-colors"
-                            >
-                                <Plus className="w-3.5 h-3.5" />
-                                Add
-                            </button>
+                        <div className="px-4 pb-4">
+                            <div className="flex items-center gap-2">
+                                <input
+                                    type="text"
+                                    value={newAccountName}
+                                    onChange={(e) => setNewAccountName(e.target.value)}
+                                    onKeyDown={(e) => e.key === 'Enter' && handleAddAccount()}
+                                    placeholder="New account name"
+                                    className="flex-1 px-3 py-1.5 text-sm rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                                />
+                                <button
+                                    onClick={handleAddAccount}
+                                    disabled={!newAccountName.trim()}
+                                    className="flex items-center gap-1 px-3 py-1.5 text-sm bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-300 dark:disabled:bg-slate-600 text-white rounded-lg font-medium transition-colors"
+                                >
+                                    <Plus className="w-3.5 h-3.5" />
+                                    Add
+                                </button>
+                            </div>
                         </div>
-                    </div>
-
-                    {/* Info */}
-                    <div className="text-sm text-slate-500 dark:text-slate-400 bg-slate-50 dark:bg-slate-700/50 rounded-lg p-3">
-                        <p className="font-medium text-slate-700 dark:text-slate-300 mb-1">About Live Prices</p>
-                        <p>When enabled, stock prices are fetched from stockprices.dev (free, no API key required). Prices are cached for offline use.</p>
-                        <p className="mt-2">When disabled, only realized gains from closed positions are tracked.</p>
                     </div>
                 </div>
 
@@ -428,7 +412,7 @@ export const SettingsModal = ({ onClose, showToast, accounts, onCreateAccount, o
                 <div className="p-4 border-t border-slate-200 dark:border-slate-700 shrink-0">
                     <button
                         onClick={onClose}
-                        className="w-full py-2 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-300 rounded-lg font-medium transition-colors"
+                        className="w-full py-2 bg-indigo-600 hover:bg-indigo-700 dark:bg-indigo-500 dark:hover:bg-indigo-600 text-white rounded-lg font-medium transition-colors"
                     >
                         Done
                     </button>

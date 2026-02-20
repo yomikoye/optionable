@@ -95,13 +95,26 @@ export const useCSV = ({ trades, fundTransactions, stocks, refreshAll, refreshPo
                 if (!response.ok) throw new Error('Failed to import trades');
                 const result = await response.json();
                 importedCount += result.data.imported;
-                results.push(`${result.data.imported} trades`);
+                const tradeParts = [`${result.data.imported} trades`];
+                if (result.data.skipped > 0) tradeParts.push(`${result.data.skipped} skipped`);
+                results.push(tradeParts.join(', '));
             }
 
-            // Import fund transactions
+            // Import fund transactions (with dedup)
             if (sections.fundTransactions.length > 0) {
+                // Fetch existing fund transactions for dedup
+                const existingFundRes = await fetch(`${API_URL}/fund-transactions${accountId ? `?accountId=${accountId}` : ''}`);
+                const existingFundData = existingFundRes.ok ? await existingFundRes.json() : { data: [] };
+                const existingFundSet = new Set((existingFundData.data || []).map(f =>
+                    `${f.type}|${f.amount}|${f.date}|${f.description || ''}`
+                ));
+
                 let fundCount = 0;
+                let fundSkipped = 0;
                 for (const txn of sections.fundTransactions) {
+                    const key = `${txn.type}|${txn.amount}|${txn.date}|${txn.description || ''}`;
+                    if (existingFundSet.has(key)) { fundSkipped++; continue; }
+                    existingFundSet.add(key);
                     const response = await fetch(`${API_URL}/fund-transactions`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
@@ -113,13 +126,26 @@ export const useCSV = ({ trades, fundTransactions, stocks, refreshAll, refreshPo
                     if (response.ok) fundCount++;
                 }
                 importedCount += fundCount;
-                results.push(`${fundCount} fund transactions`);
+                const fundParts = [`${fundCount} fund transactions`];
+                if (fundSkipped > 0) fundParts.push(`${fundSkipped} skipped`);
+                results.push(fundParts.join(', '));
             }
 
-            // Import stocks
+            // Import stocks (with dedup)
             if (sections.stocks.length > 0) {
+                // Fetch existing stocks for dedup
+                const existingStockRes = await fetch(`${API_URL}/stocks${accountId ? `?accountId=${accountId}` : ''}`);
+                const existingStockData = existingStockRes.ok ? await existingStockRes.json() : { data: [] };
+                const existingStockSet = new Set((existingStockData.data || []).map(s =>
+                    `${s.ticker}|${s.shares}|${s.costBasis}|${s.acquiredDate}`
+                ));
+
                 let stockCount = 0;
+                let stockSkipped = 0;
                 for (const stock of sections.stocks) {
+                    const key = `${stock.ticker}|${stock.shares}|${stock.costBasis}|${stock.acquiredDate}`;
+                    if (existingStockSet.has(key)) { stockSkipped++; continue; }
+                    existingStockSet.add(key);
                     const body = {
                         ticker: stock.ticker,
                         shares: Number(stock.shares),
@@ -150,7 +176,9 @@ export const useCSV = ({ trades, fundTransactions, stocks, refreshAll, refreshPo
                     }
                 }
                 importedCount += stockCount;
-                results.push(`${stockCount} stocks`);
+                const stockParts = [`${stockCount} stocks`];
+                if (stockSkipped > 0) stockParts.push(`${stockSkipped} skipped`);
+                results.push(stockParts.join(', '));
             }
 
             await refreshAll();

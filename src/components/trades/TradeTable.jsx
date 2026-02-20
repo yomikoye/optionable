@@ -153,11 +153,47 @@ export const TradeTable = ({
             }
         }
 
-        // Sort chains by most recent opened date (newest first)
-        chains.sort((a, b) => new Date(b.root.openedDate) - new Date(a.root.openedDate));
+        // Sort chains: use user's sort selection, or default to newest first
+        if (sortConfig.key) {
+            chains.sort((a, b) => {
+                let aVal, bVal;
+                const aLast = a.trades[a.trades.length - 1];
+                const bLast = b.trades[b.trades.length - 1];
+                if (sortConfig.key === 'pnl') {
+                    aVal = a.chainPnL;
+                    bVal = b.chainPnL;
+                } else if (sortConfig.key === 'roi') {
+                    aVal = a.chainRoi;
+                    bVal = b.chainRoi;
+                } else if (sortConfig.key === 'ticker') {
+                    aVal = a.root.ticker.toLowerCase();
+                    bVal = b.root.ticker.toLowerCase();
+                } else if (sortConfig.key === 'openedDate' || sortConfig.key === 'expirationDate') {
+                    aVal = new Date(a.root[sortConfig.key]);
+                    bVal = new Date(b.root[sortConfig.key]);
+                } else if (sortConfig.key === 'status') {
+                    aVal = a.finalStatus;
+                    bVal = b.finalStatus;
+                } else if (sortConfig.key === 'dte') {
+                    aVal = calculateDTE(aLast.expirationDate, aLast.status) ?? -1;
+                    bVal = calculateDTE(bLast.expirationDate, bLast.status) ?? -1;
+                } else if (sortConfig.key === 'delta') {
+                    aVal = a.root.delta ?? -1;
+                    bVal = b.root.delta ?? -1;
+                } else {
+                    aVal = a.root[sortConfig.key];
+                    bVal = b.root[sortConfig.key];
+                }
+                if (aVal < bVal) return sortConfig.direction === 'asc' ? -1 : 1;
+                if (aVal > bVal) return sortConfig.direction === 'asc' ? 1 : -1;
+                return 0;
+            });
+        } else {
+            chains.sort((a, b) => new Date(b.root.openedDate) - new Date(a.root.openedDate));
+        }
 
         return chains;
-    }, [filteredAndSortedTrades]);
+    }, [filteredAndSortedTrades, sortConfig]);
 
     // Paginate chains
     const showAll = tradesPerPage === null;
@@ -246,27 +282,37 @@ export const TradeTable = ({
                             <th className="px-3 py-2 w-[12%] font-semibold text-center cursor-pointer hover:text-slate-700 dark:hover:text-slate-200" onClick={() => handleSort('ticker')}>
                                 <span className="inline-flex items-center gap-1 justify-center"><span className="p-0.5"><ChevronRight className="w-4 h-4 text-transparent" /></span>Ticker {getSortIcon('ticker')}</span>
                             </th>
-                            <th className="px-3 py-2 w-[5%] font-semibold text-center">Type</th>
+                            <th className="px-3 py-2 w-[5%] font-semibold text-center cursor-pointer hover:text-slate-700 dark:hover:text-slate-200" onClick={() => handleSort('type')}>
+                                <span className="inline-flex items-center gap-1 justify-center">Type {getSortIcon('type')}</span>
+                            </th>
                             <th className="px-3 py-2 w-[7%] font-semibold text-center cursor-pointer hover:text-slate-700 dark:hover:text-slate-200" onClick={() => handleSort('strike')}>
                                 <span className="inline-flex items-center gap-1 justify-center">Strike {getSortIcon('strike')}</span>
                             </th>
                             {livePricesEnabled && <th className="px-3 py-2 w-[7%] font-semibold text-center">Price</th>}
-                            <th className="px-3 py-2 w-[5%] font-semibold text-center">Qty</th>
-                            <th className="px-3 py-2 w-[6%] font-semibold text-center">Delta</th>
+                            <th className="px-3 py-2 w-[5%] font-semibold text-center cursor-pointer hover:text-slate-700 dark:hover:text-slate-200" onClick={() => handleSort('quantity')}>
+                                <span className="inline-flex items-center gap-1 justify-center">Qty {getSortIcon('quantity')}</span>
+                            </th>
+                            <th className="px-3 py-2 w-[6%] font-semibold text-center cursor-pointer hover:text-slate-700 dark:hover:text-slate-200" onClick={() => handleSort('delta')}>
+                                <span className="inline-flex items-center gap-1 justify-center">Delta {getSortIcon('delta')}</span>
+                            </th>
                             <th className="px-3 py-2 w-[8%] font-semibold text-center cursor-pointer hover:text-slate-700 dark:hover:text-slate-200" onClick={() => handleSort('openedDate')}>
                                 <span className="inline-flex items-center gap-1 justify-center">Opened {getSortIcon('openedDate')}</span>
                             </th>
                             <th className="px-3 py-2 w-[8%] font-semibold text-center cursor-pointer hover:text-slate-700 dark:hover:text-slate-200" onClick={() => handleSort('expirationDate')}>
                                 <span className="inline-flex items-center gap-1 justify-center">Expiry {getSortIcon('expirationDate')}</span>
                             </th>
-                            <th className="px-3 py-2 w-[5%] font-semibold text-center">DTE</th>
+                            <th className="px-3 py-2 w-[5%] font-semibold text-center cursor-pointer hover:text-slate-700 dark:hover:text-slate-200" onClick={() => handleSort('dte')}>
+                                <span className="inline-flex items-center gap-1 justify-center">DTE {getSortIcon('dte')}</span>
+                            </th>
                             <th className="px-3 py-2 w-[9%] font-semibold text-center cursor-pointer hover:text-slate-700 dark:hover:text-slate-200" onClick={() => handleSort('pnl')}>
                                 <span className="inline-flex items-center gap-1 justify-center">P/L {getSortIcon('pnl')}</span>
                             </th>
                             <th className="px-3 py-2 w-[7%] font-semibold text-center cursor-pointer hover:text-slate-700 dark:hover:text-slate-200" onClick={() => handleSort('roi')}>
                                 <span className="inline-flex items-center gap-1 justify-center">ROI {getSortIcon('roi')}</span>
                             </th>
-                            <th className="px-3 py-2 w-[8%] font-semibold text-center">Status</th>
+                            <th className="px-3 py-2 w-[8%] font-semibold text-center cursor-pointer hover:text-slate-700 dark:hover:text-slate-200" onClick={() => handleSort('status')}>
+                                <span className="inline-flex items-center gap-1 justify-center">Status {getSortIcon('status')}</span>
+                            </th>
                             <th className="px-3 py-2 w-[13%] font-semibold text-right">Actions</th>
                         </tr>
                     </thead>
@@ -483,7 +529,7 @@ export const TradeTable = ({
                                                     </td>
                                                     <td className="px-3 py-2 text-center">
                                                         {dte !== null ? (
-                                                            <span className={`font-mono text-sm ${dte <= 3 ? 'text-red-500' : dte <= 7 ? 'text-orange-500' : 'text-slate-500'}`}>
+                                                            <span className={`font-mono text-sm font-medium ${dte <= 3 ? 'text-red-600 dark:text-red-400' : dte <= 7 ? 'text-orange-600 dark:text-orange-400' : 'text-slate-600 dark:text-slate-300'}`}>
                                                                 {dte}d
                                                             </span>
                                                         ) : (
@@ -501,21 +547,23 @@ export const TradeTable = ({
                                                     }`}>
                                                         {trade.status}
                                                     </td>
-                                                    <td className="px-3 py-2 text-center">
-                                                        <div className="flex justify-center gap-1">
+                                                    <td className="px-3 py-2 text-right">
+                                                        <div className="flex justify-end gap-1">
                                                             <button
                                                                 onClick={() => onEdit(trade)}
-                                                                className="p-1.5 text-slate-400 hover:text-indigo-500 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 rounded"
+                                                                className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-slate-500 dark:text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 rounded transition-colors"
                                                                 title="Edit trade"
                                                             >
                                                                 <Edit2 className="w-3.5 h-3.5" />
+                                                                <span>Edit</span>
                                                             </button>
                                                             <button
                                                                 onClick={() => onDelete(trade.id)}
-                                                                className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 rounded"
+                                                                className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-slate-500 dark:text-slate-400 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30 rounded transition-colors"
                                                                 title="Delete trade"
                                                             >
                                                                 <Trash2 className="w-3.5 h-3.5" />
+                                                                <span>Delete</span>
                                                             </button>
                                                         </div>
                                                     </td>

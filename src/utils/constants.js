@@ -2,7 +2,7 @@
 export const API_URL = '/api';
 
 // App Version
-export const APP_VERSION = '0.12.0';
+export const APP_VERSION = '0.13.0';
 
 // Pagination (default fallback — configurable via Settings)
 export const TRADES_PER_PAGE = 5;

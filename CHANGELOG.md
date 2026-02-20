@@ -1,5 +1,28 @@
 # Changelog
 
+## v0.13.0
+
+### New Features
+- **Database export** — Download a full backup of the SQLite database from Settings
+- **Import duplicate detection** — Re-importing the same CSV skips existing trades, fund transactions, and stocks instead of creating duplicates; skipped counts shown in toast notification
+
+### Settings UI
+- **Alphabetical order** — Settings sections reordered: Confirm Expiry, Dark Mode, Paginate Trades, Portfolio Mode, Show Help on Startup
+- **Consistent icon colors** — All setting icons now use the same indigo/blue color
+- **Removed Live Prices section** — Cleaned up the Live Stock Prices toggle and info box
+- **Beautified Accounts section** — Accounts moved to bottom with centered header, card-style rows, and indigo-themed action buttons
+- **Export Database section** — Added with divider lines above and below for visual separation
+- **Blue Done button** — Footer button now matches the app's indigo theme
+
+### Bug Fixes
+- **Orphaned position cleanup** — Startup cleanup now catches positions referencing deleted trades (stale foreign keys), fixing phantom capital gains in Portfolio stats after demo trade deletion
+- **Portfolio stats refresh** — Deleting trades now immediately refreshes Portfolio data without requiring a page reload
+- **Chain child row alignment** — Edit/Delete buttons in expanded chain rows now right-aligned with text labels, matching the root row style
+- **Dark mode DTE colors** — Fixed missing dark mode color variants on chain child row DTE values
+- **Dev server restart loop** — Fixed `--watch-path` to only watch backend files, preventing server restarts on frontend edits
+
+---
+
 ## v0.12.0
 
 ### Configurable Pagination

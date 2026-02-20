@@ -87,8 +87,16 @@ router.post('/import', (req, res) => {
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `);
 
+        const dupCheck = db.prepare(`
+            SELECT id FROM trades
+            WHERE ticker = ? AND type = ? AND strike = ? AND quantity = ? AND entryPrice = ? AND openedDate = ? AND expirationDate = ?
+              AND (accountId = ? OR (accountId IS NULL AND ? IS NULL))
+            LIMIT 1
+        `);
+
         const insertMany = db.transaction((trades) => {
             let imported = 0;
+            let skipped = 0;
             const idMap = new Map(); // old ID → new ID
             const assignedTrades = []; // track assigned trades for position creation
 
@@ -107,6 +115,20 @@ router.post('/import', (req, res) => {
                     try {
                         const newParentId = oldParentId ? (idMap.get(oldParentId) || null) : null;
                         const tradeAccountId = trade.accountId || accountId || null;
+
+                        // Skip duplicates
+                        const existing = dupCheck.get(
+                            trade.ticker?.toUpperCase(), trade.type, toCents(trade.strike),
+                            trade.quantity || 1, toCents(trade.entryPrice),
+                            trade.openedDate, trade.expirationDate,
+                            tradeAccountId, tradeAccountId
+                        );
+                        if (existing) {
+                            if (trade.id) idMap.set(Number(trade.id), existing.id);
+                            skipped++;
+                            remaining.splice(i, 1);
+                            continue;
+                        }
                         const result = stmt.run(
                             trade.ticker?.toUpperCase(),
                             trade.type,
@@ -177,11 +199,11 @@ router.post('/import', (req, res) => {
                 }
             }
 
-            return imported;
+            return { imported, skipped };
         });
 
-        const imported = insertMany(trades);
-        apiResponse.created(res, { imported, total: trades.length });
+        const result = insertMany(trades);
+        apiResponse.created(res, { imported: result.imported, skipped: result.skipped, total: trades.length });
     } catch (error) {
         console.error('Error importing trades:', error);
         apiResponse.error(res, 'Failed to import trades');

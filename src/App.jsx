@@ -56,9 +56,8 @@ export default function App() {
 
     // Compose refreshAll at App level
     const refreshAll = useCallback(async () => {
-        await fetchTrades();
-        await fetchCapitalGainsStats();
-    }, [fetchTrades, fetchCapitalGainsStats]);
+        await Promise.all([fetchTrades(), fetchCapitalGainsStats(), portfolio.fetchAll()]);
+    }, [fetchTrades, fetchCapitalGainsStats, portfolio.fetchAll]);
 
     // Toast state
     const [toast, setToast] = useState(null);

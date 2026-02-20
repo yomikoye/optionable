@@ -34,12 +34,33 @@ export const fixCostBasis = () => {
 
 // Clean up orphaned positions (positions whose originating trade was deleted)
 export const cleanOrphanedPositions = () => {
-    const orphanedPositions = db.prepare(`
+    // Remove positions with NULL reference (acquiredFromTradeId cleared)
+    const nullRef = db.prepare(`
         DELETE FROM positions
         WHERE acquiredFromTradeId IS NULL
     `).run();
-    if (orphanedPositions.changes > 0) {
-        console.log(`🧹 Cleaned up ${orphanedPositions.changes} orphaned position(s)`);
+
+    // Remove positions whose originating trade no longer exists (stale foreign key)
+    const staleRef = db.prepare(`
+        DELETE FROM positions
+        WHERE acquiredFromTradeId IS NOT NULL
+          AND acquiredFromTradeId NOT IN (SELECT id FROM trades)
+    `).run();
+
+    // Clear sold fields on positions whose selling trade no longer exists
+    const staleSold = db.prepare(`
+        UPDATE positions
+        SET soldDate = NULL, salePrice = NULL, soldViaTradeId = NULL, capitalGainLoss = NULL, updatedAt = CURRENT_TIMESTAMP
+        WHERE soldViaTradeId IS NOT NULL
+          AND soldViaTradeId NOT IN (SELECT id FROM trades)
+    `).run();
+
+    const total = nullRef.changes + staleRef.changes;
+    if (total > 0) {
+        console.log(`🧹 Cleaned up ${total} orphaned position(s)`);
+    }
+    if (staleSold.changes > 0) {
+        console.log(`🧹 Reset ${staleSold.changes} position(s) with stale sold references`);
     }
 };
 
