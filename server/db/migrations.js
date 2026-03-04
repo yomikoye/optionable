@@ -371,6 +371,28 @@ const migrations = [
                 ALTER TABLE trades ADD COLUMN commission INTEGER NOT NULL DEFAULT 0;
             `);
         }
+    },
+    {
+        version: 13,
+        description: 'Default account commission rate $0.66 + backfill',
+        up: () => {
+            const rate = 66; // $0.66 in cents
+            // Set default account (first account) to $0.66/contract
+            const defaultAccount = db.prepare('SELECT id FROM accounts ORDER BY id LIMIT 1').get();
+            if (!defaultAccount) return;
+
+            db.prepare('UPDATE accounts SET commissionPerContract = ?, updatedAt = CURRENT_TIMESTAMP WHERE id = ?')
+                .run(rate, defaultAccount.id);
+
+            // Recalculate commission for all trades in the default account
+            const trades = db.prepare('SELECT id, quantity, status FROM trades WHERE accountId = ?').all(defaultAccount.id);
+            const updateStmt = db.prepare('UPDATE trades SET commission = ?, updatedAt = CURRENT_TIMESTAMP WHERE id = ?');
+            for (const trade of trades) {
+                const legs = (trade.status === 'Closed' || trade.status === 'Rolled') ? 2 : 1;
+                updateStmt.run(rate * (trade.quantity || 1) * legs, trade.id);
+            }
+            console.log(`💰 Set default account to $0.66/contract, recalculated ${trades.length} trades`);
+        }
     }
 ];
 

@@ -452,15 +452,12 @@ router.put('/:id', (req, res) => {
         const parentTradeId = req.body.parentTradeId ?? currentTrade.parentTradeId;
         const notes = req.body.notes ?? currentTrade.notes;
 
-        // Commission: if explicitly provided use it, else recalculate if status or quantity changed, else keep current
+        // Commission: if explicitly provided use it, else always recalculate from account rate
         let commissionCents;
         if (req.body.commission !== undefined && req.body.commission !== null && req.body.commission !== '') {
             commissionCents = toCents(req.body.commission);
-        } else if (status !== currentTrade.status || (quantity || 1) !== currentTrade.quantity) {
-            // Status or quantity changed — recalculate commission
-            commissionCents = calculateCommission(currentTrade.accountId, quantity || 1, status);
         } else {
-            commissionCents = currentTrade.commission;
+            commissionCents = calculateCommission(currentTrade.accountId, quantity || 1, status);
         }
 
         const stmt = db.prepare(`

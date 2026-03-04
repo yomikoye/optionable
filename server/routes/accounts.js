@@ -71,6 +71,18 @@ router.put('/:id', (req, res) => {
         db.prepare('UPDATE accounts SET name = ?, commissionPerContract = ?, updatedAt = CURRENT_TIMESTAMP WHERE id = ?')
             .run(name, commissionCents, req.params.id);
 
+        // If commission rate changed, recalculate all trades for this account
+        if (commissionCents !== current.commissionPerContract) {
+            const trades = db.prepare('SELECT id, quantity, status FROM trades WHERE accountId = ?').all(req.params.id);
+            const updateStmt = db.prepare('UPDATE trades SET commission = ?, updatedAt = CURRENT_TIMESTAMP WHERE id = ?');
+            for (const trade of trades) {
+                const legs = (trade.status === 'Closed' || trade.status === 'Rolled') ? 2 : 1;
+                const newCommission = commissionCents * (trade.quantity || 1) * legs;
+                updateStmt.run(newCommission, trade.id);
+            }
+            console.log(`💰 Recalculated commission for ${trades.length} trades in account #${req.params.id}`);
+        }
+
         const account = db.prepare('SELECT * FROM accounts WHERE id = ?').get(req.params.id);
         apiResponse.success(res, accountToApi(account));
     } catch (error) {

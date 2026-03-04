@@ -52,7 +52,7 @@ export const useTradeForm = ({ refreshAll, showToast, setError, setCurrentPage, 
                 status: trade.status,
                 parentTradeId: trade.parentTradeId || null,
                 notes: trade.notes || '',
-                commission: (trade.commission != null) ? trade.commission : '',
+                commission: trade.commission ? trade.commission : '',
             });
         } else {
             setEditingId(null);
