@@ -4,7 +4,7 @@
 
 Wheel Strategy Tracker for Cash Secured Puts (CSPs) and Covered Calls (CCs) with multi-account support and portfolio management. Self-hosted, local-first app with SQLite storage. Only external dependency is optional live stock prices via [stockprices.dev](https://stockprices.dev).
 
-**Current Version:** 0.13.0
+**Current Version:** 0.14.0
 **Docker:** `yomikoye/optionable:latest`
 
 ---
@@ -18,7 +18,7 @@ server/
 ├── index.js                     # createApp() + startServer()
 ├── db/
 │   ├── connection.js            # DB singleton, WAL, pragmas
-│   ├── migrations.js            # Schema versioning + 10 migrations
+│   ├── migrations.js            # Schema versioning + 12 migrations
 │   └── seed.js                  # Demo data + cost basis fixup
 ├── middleware/
 │   └── index.js                 # cors, json parser, request ID, security headers
@@ -95,9 +95,9 @@ src/
 
 All prices stored as INTEGER cents (converted at API boundary).
 
-- **trades** — ticker, type (CSP/CC), strike, quantity, delta, entryPrice, closePrice, dates, status, parentTradeId, notes, accountId
+- **trades** — ticker, type (CSP/CC), strike, quantity, delta, entryPrice, closePrice, dates, status, parentTradeId, notes, commission, accountId
 - **positions** — ticker, shares, costBasis, acquiredDate, acquiredFromTradeId, salePrice, soldViaTradeId, capitalGainLoss, accountId
-- **accounts** — name, createdAt, updatedAt
+- **accounts** — name, commissionPerContract, createdAt, updatedAt
 - **fund_transactions** — accountId, type (deposit/withdrawal/dividend/interest/fee), amount, date, description
 - **stocks** — accountId, ticker, shares, costBasis, acquiredDate, soldDate, salePrice, capitalGainLoss, notes
 - **price_cache** — ticker, price, change, changePercent (cached from stockprices.dev)
@@ -111,7 +111,7 @@ All prices stored as INTEGER cents (converted at API boundary).
 | `server.js` | Thin entry point (imports `server/index.js`) |
 | `server/index.js` | App creation, startup orchestration |
 | `server/db/connection.js` | Database singleton + WAL config |
-| `server/db/migrations.js` | Schema versioning (10 migrations) |
+| `server/db/migrations.js` | Schema versioning (12 migrations) |
 | `server/routes/trades.js` | Trade CRUD + roll + import endpoints |
 | `server/routes/portfolio.js` | Portfolio stats + monthly breakdown |
 | `src/App.jsx` | React orchestration with tab routing |

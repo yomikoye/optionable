@@ -212,6 +212,21 @@ export const TradeModal = ({
                         )}
                     </div>
 
+                    {/* Commission */}
+                    <div>
+                        <label className="block text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase mb-1">Commission ($)</label>
+                        <div className="relative">
+                            <span className="absolute left-3 top-2 text-slate-400">$</span>
+                            <input
+                                type="number" step="0.01" min="0" name="commission"
+                                value={formData.commission} onChange={handleInputChange}
+                                className="w-full pl-7 pr-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 bg-white dark:bg-slate-700 text-slate-900 dark:text-white"
+                                placeholder="Auto"
+                            />
+                        </div>
+                        <p className="text-[10px] text-slate-400 mt-1">Leave blank to auto-calculate from account rate</p>
+                    </div>
+
                     <div>
                         <label className="block text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase mb-1">Notes</label>
                         <textarea

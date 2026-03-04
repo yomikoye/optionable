@@ -15,6 +15,7 @@ const initialFormState = {
     status: 'Open',
     parentTradeId: null,
     notes: '',
+    commission: '',
 };
 
 export const useTradeForm = ({ refreshAll, showToast, setError, setCurrentPage, accountId }) => {
@@ -51,6 +52,7 @@ export const useTradeForm = ({ refreshAll, showToast, setError, setCurrentPage, 
                 status: trade.status,
                 parentTradeId: trade.parentTradeId || null,
                 notes: trade.notes || '',
+                commission: (trade.commission != null) ? trade.commission : '',
             });
         } else {
             setEditingId(null);
@@ -81,6 +83,7 @@ export const useTradeForm = ({ refreshAll, showToast, setError, setCurrentPage, 
             status: 'Open',
             parentTradeId: null,
             notes: '',
+            commission: '',
         });
         setIsModalOpen(true);
     }, []);
@@ -105,6 +108,7 @@ export const useTradeForm = ({ refreshAll, showToast, setError, setCurrentPage, 
             status: 'Open',
             parentTradeId: trade.id,
             notes: '',
+            commission: '',
         });
         setIsModalOpen(true);
     }, []);
@@ -128,6 +132,7 @@ export const useTradeForm = ({ refreshAll, showToast, setError, setCurrentPage, 
             status: 'Open',
             parentTradeId: cspTrade.id,
             notes: '',
+            commission: '',
         });
         setIsModalOpen(true);
     }, []);
@@ -181,6 +186,10 @@ export const useTradeForm = ({ refreshAll, showToast, setError, setCurrentPage, 
             notes: formData.notes || null,
             accountId: accountId || modalAccountId || null,
         };
+        // Only send commission if user explicitly set it (non-empty string)
+        if (formData.commission !== '' && formData.commission !== null && formData.commission !== undefined) {
+            tradeData.commission = Number(formData.commission);
+        }
 
         try {
             if (isRolling && rollFromTrade) {
@@ -237,7 +246,6 @@ export const useTradeForm = ({ refreshAll, showToast, setError, setCurrentPage, 
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    ...trade,
                     closePrice: 0,
                     closedDate: new Date().toISOString().split('T')[0],
                     status: 'Expired',

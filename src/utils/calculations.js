@@ -28,9 +28,10 @@ export const calculateMetrics = (trade) => {
     const entryPrice = parseFloat(trade.entryPrice) || 0;
     const closePrice = parseFloat(trade.closePrice) || 0;
 
+    const commission = parseFloat(trade.commission) || 0;
     const totalPremium = entryPrice * quantity * 100;
     const totalCloseCost = closePrice * quantity * 100;
-    const pnl = totalPremium - totalCloseCost;
+    const pnl = totalPremium - totalCloseCost - commission;
 
     const collateral = strike * quantity * 100;
     const roi = collateral > 0 ? (pnl / collateral) * 100 : 0;

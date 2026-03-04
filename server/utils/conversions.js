@@ -17,7 +17,17 @@ export const tradeToApi = (trade) => {
         ...trade,
         strike: toDollars(trade.strike),
         entryPrice: toDollars(trade.entryPrice),
-        closePrice: toDollars(trade.closePrice)
+        closePrice: toDollars(trade.closePrice),
+        commission: toDollars(trade.commission)
+    };
+};
+
+// Convert an account object from DB (cents) to API (dollars)
+export const accountToApi = (account) => {
+    if (!account) return null;
+    return {
+        ...account,
+        commissionPerContract: toDollars(account.commissionPerContract)
     };
 };
 

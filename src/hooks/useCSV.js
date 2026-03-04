@@ -1,7 +1,7 @@
 import { useCallback } from 'react';
 import { API_URL } from '../utils/constants';
 
-const TRADE_HEADERS = ['id', 'ticker', 'type', 'strike', 'quantity', 'delta', 'entryPrice', 'closePrice', 'openedDate', 'expirationDate', 'closedDate', 'status', 'parentTradeId', 'notes', 'accountId'];
+const TRADE_HEADERS = ['id', 'ticker', 'type', 'strike', 'quantity', 'delta', 'entryPrice', 'closePrice', 'openedDate', 'expirationDate', 'closedDate', 'status', 'parentTradeId', 'notes', 'accountId', 'commission'];
 const FUND_HEADERS = ['type', 'amount', 'date', 'description', 'accountId'];
 const STOCK_HEADERS = ['ticker', 'shares', 'costBasis', 'acquiredDate', 'soldDate', 'salePrice', 'notes', 'accountId'];
 

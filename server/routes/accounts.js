@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { db } from '../db/connection.js';
+import { toCents, accountToApi } from '../utils/conversions.js';
 import { apiResponse } from '../utils/response.js';
 import { validateAccount } from '../utils/validation.js';
 
@@ -9,7 +10,7 @@ const router = Router();
 router.get('/', (req, res) => {
     try {
         const accounts = db.prepare('SELECT * FROM accounts ORDER BY id ASC').all();
-        apiResponse.success(res, accounts);
+        apiResponse.success(res, accounts.map(accountToApi));
     } catch (error) {
         console.error('Error fetching accounts:', error);
         apiResponse.error(res, 'Failed to fetch accounts');
@@ -23,7 +24,7 @@ router.get('/:id', (req, res) => {
         if (!account) {
             return apiResponse.error(res, 'Account not found', 404);
         }
-        apiResponse.success(res, account);
+        apiResponse.success(res, accountToApi(account));
     } catch (error) {
         console.error('Error fetching account:', error);
         apiResponse.error(res, 'Failed to fetch account');
@@ -38,9 +39,10 @@ router.post('/', (req, res) => {
             return apiResponse.error(res, 'Validation failed', 400, validationErrors);
         }
 
-        const result = db.prepare('INSERT INTO accounts (name) VALUES (?)').run(req.body.name.trim());
+        const commissionCents = toCents(req.body.commissionPerContract) || 0;
+        const result = db.prepare('INSERT INTO accounts (name, commissionPerContract) VALUES (?, ?)').run(req.body.name.trim(), commissionCents);
         const account = db.prepare('SELECT * FROM accounts WHERE id = ?').get(result.lastInsertRowid);
-        apiResponse.created(res, account);
+        apiResponse.created(res, accountToApi(account));
     } catch (error) {
         console.error('Error creating account:', error);
         apiResponse.error(res, 'Failed to create account');
@@ -55,15 +57,22 @@ router.put('/:id', (req, res) => {
             return apiResponse.error(res, 'Validation failed', 400, validationErrors);
         }
 
-        const result = db.prepare('UPDATE accounts SET name = ?, updatedAt = CURRENT_TIMESTAMP WHERE id = ?')
-            .run(req.body.name.trim(), req.params.id);
-
-        if (result.changes === 0) {
+        // Build dynamic update
+        const current = db.prepare('SELECT * FROM accounts WHERE id = ?').get(req.params.id);
+        if (!current) {
             return apiResponse.error(res, 'Account not found', 404);
         }
 
+        const name = req.body.name !== undefined ? req.body.name.trim() : current.name;
+        const commissionCents = req.body.commissionPerContract !== undefined
+            ? (toCents(req.body.commissionPerContract) || 0)
+            : current.commissionPerContract;
+
+        db.prepare('UPDATE accounts SET name = ?, commissionPerContract = ?, updatedAt = CURRENT_TIMESTAMP WHERE id = ?')
+            .run(name, commissionCents, req.params.id);
+
         const account = db.prepare('SELECT * FROM accounts WHERE id = ?').get(req.params.id);
-        apiResponse.success(res, account);
+        apiResponse.success(res, accountToApi(account));
     } catch (error) {
         console.error('Error updating account:', error);
         apiResponse.error(res, 'Failed to update account');

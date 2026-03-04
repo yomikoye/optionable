@@ -67,6 +67,12 @@ export const validateTrade = (trade, isUpdate = false) => {
         if (!dateRegex.test(trade.closedDate)) errors.push('closedDate must be in YYYY-MM-DD format');
     }
 
+    // Commission validation
+    if (trade.commission !== undefined && trade.commission !== null && trade.commission !== '') {
+        const commission = Number(trade.commission);
+        if (isNaN(commission) || commission < 0) errors.push('commission must be a non-negative number');
+    }
+
     // Date logic: expiration should be >= opened
     if (trade.openedDate && trade.expirationDate && trade.openedDate > trade.expirationDate) {
         errors.push('expirationDate must be on or after openedDate');
@@ -83,6 +89,10 @@ export const validateAccount = (data, isUpdate = false) => {
         }
     } else if (!isUpdate) {
         errors.push('name is required');
+    }
+    if (data.commissionPerContract !== undefined && data.commissionPerContract !== null && data.commissionPerContract !== '') {
+        const rate = Number(data.commissionPerContract);
+        if (isNaN(rate) || rate < 0) errors.push('commissionPerContract must be a non-negative number');
     }
     return errors;
 };

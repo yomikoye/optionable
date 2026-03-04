@@ -23,9 +23,10 @@ router.get('/', (req, res) => {
                 COUNT(CASE WHEN status = 'Assigned' THEN 1 END) as assignedCount,
                 COUNT(CASE WHEN status = 'Rolled' THEN 1 END) as rolledCount,
                 COUNT(CASE WHEN status = 'Closed' THEN 1 END) as closedCount,
-                COALESCE(SUM((entryPrice - closePrice) * quantity * 100), 0) as totalPnL,
+                COALESCE(SUM((entryPrice - closePrice) * quantity * 100 - commission), 0) as totalPnL,
                 COALESCE(SUM(entryPrice * quantity * 100), 0) as totalPremium,
-                COALESCE(SUM(CASE WHEN status = 'Open' THEN strike * quantity * 100 ELSE 0 END), 0) as capitalAtRisk
+                COALESCE(SUM(CASE WHEN status = 'Open' THEN strike * quantity * 100 ELSE 0 END), 0) as capitalAtRisk,
+                COALESCE(SUM(commission), 0) as totalCommissions
             FROM trades
             ${acctWhere}
         `).get(...acctParams);
@@ -47,7 +48,7 @@ router.get('/', (req, res) => {
                 SELECT
                     id as root_id,
                     id as current_id,
-                    (entryPrice - closePrice) * quantity * 100 as chain_pnl,
+                    (entryPrice - closePrice) * quantity * 100 - commission as chain_pnl,
                     status as final_status
                 FROM trades
                 WHERE parentTradeId IS NULL ${acctAnd}
@@ -58,7 +59,7 @@ router.get('/', (req, res) => {
                 SELECT
                     cw.root_id,
                     t.id as current_id,
-                    cw.chain_pnl + (t.entryPrice - t.closePrice) * t.quantity * 100,
+                    cw.chain_pnl + (t.entryPrice - t.closePrice) * t.quantity * 100 - t.commission,
                     t.status as final_status
                 FROM chain_walk cw
                 JOIN trades t ON t.parentTradeId = cw.current_id
@@ -85,7 +86,7 @@ router.get('/', (req, res) => {
         const monthlyStats = db.prepare(`
             SELECT
                 strftime('%Y-%m', COALESCE(closedDate, openedDate)) as month,
-                SUM((entryPrice - closePrice) * quantity * 100) as pnl
+                SUM((entryPrice - closePrice) * quantity * 100 - commission) as pnl
             FROM trades
             WHERE status NOT IN ('Open', 'Rolled') ${acctAnd}
             GROUP BY month
@@ -96,7 +97,7 @@ router.get('/', (req, res) => {
         const tickerStats = db.prepare(`
             SELECT
                 ticker,
-                SUM((entryPrice - closePrice) * quantity * 100) as pnl
+                SUM((entryPrice - closePrice) * quantity * 100 - commission) as pnl
             FROM trades
             ${acctWhere}
             GROUP BY ticker
@@ -110,7 +111,7 @@ router.get('/', (req, res) => {
         const avgRoiResult = db.prepare(`
             SELECT AVG(
                 CASE WHEN strike > 0 AND quantity > 0
-                THEN ((entryPrice - closePrice) * 100.0) / strike
+                THEN ((entryPrice - closePrice) * 100.0 - commission * 1.0 / quantity) / strike
                 ELSE 0 END
             ) as avgRoi
             FROM trades
@@ -150,7 +151,8 @@ router.get('/', (req, res) => {
             realizedCapitalGL: toDollars(positionStats.realizedCapitalGL),
             openPositions: positionStats.openPositions,
             closedPositions: positionStats.closedPositions,
-            totalPnLWithCapitalGains: toDollars(mainStats.totalPnL + positionStats.realizedCapitalGL)
+            totalPnLWithCapitalGains: toDollars(mainStats.totalPnL + positionStats.realizedCapitalGL),
+            totalCommissions: toDollars(mainStats.totalCommissions)
         });
     } catch (error) {
         console.error('Error fetching stats:', error);

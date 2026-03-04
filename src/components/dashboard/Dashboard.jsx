@@ -15,6 +15,7 @@ export const Dashboard = ({ stats }) => {
     const totalPnLWithCapitalGains = stats.totalPnLWithCapitalGains ?? stats.totalPnL;
     const realizedCapitalGL = stats.realizedCapitalGL ?? 0;
     const closedPositions = stats.closedPositions ?? 0;
+    const totalCommissions = stats.totalCommissions ?? 0;
 
     return (
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
@@ -50,7 +51,7 @@ export const Dashboard = ({ stats }) => {
                 label="Total P/L"
                 value={formatCurrency(totalPnLWithCapitalGains)}
                 valueClassName={totalPnLWithCapitalGains >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}
-                subtext="Premiums + Stock Gains"
+                subtext={totalCommissions > 0 ? `Incl. ${formatCurrency(totalCommissions)} commissions` : 'Premiums + Stock Gains'}
             />
 
             <KpiCard

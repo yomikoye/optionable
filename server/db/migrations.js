@@ -361,6 +361,16 @@ const migrations = [
             db.prepare(`INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)`).run('pagination_enabled', 'true');
             db.prepare(`INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)`).run('trades_per_page', '5');
         }
+    },
+    {
+        version: 12,
+        description: 'Commission tracking',
+        up: () => {
+            db.exec(`
+                ALTER TABLE accounts ADD COLUMN commissionPerContract INTEGER NOT NULL DEFAULT 0;
+                ALTER TABLE trades ADD COLUMN commission INTEGER NOT NULL DEFAULT 0;
+            `);
+        }
     }
 ];
 

@@ -1,5 +1,26 @@
 # Changelog
 
+## v0.14.0
+
+### New Features
+- **Commission tracking** — Per-account commission rate (`$/contract`) with automatic P/L deduction across all stats, charts, and portfolio views
+- **Auto-calculated commissions** — Commissions auto-calculate based on account rate × quantity × legs (1 leg for open/expired/assigned, 2 legs for closed/rolled); override per-trade by entering a custom value
+- **Per-trade commission override** — Leave blank for auto-calculation or enter a custom commission amount in the trade modal
+- **DB migration v12** — Added `commissionPerContract` on accounts and `commission` on trades (both INTEGER cents, default 0)
+
+### Settings
+- **Account commission rate** — Set commission rate per account (e.g., $0.66/contract for Schwab) in Settings
+- **Commission badge** — Account list shows `$X.XX/contract` badge when a rate is configured
+- **Live Prices toggle restored** — Fixed Live Stock Prices toggle that was accidentally removed in v0.13.0
+
+### Dashboard
+- **Commission in P/L** — Total P/L card subtext shows total commissions paid when commissions exist
+
+### CSV
+- **Commission column** — Export/import now includes commission per trade
+
+---
+
 ## v0.13.0
 
 ### New Features
