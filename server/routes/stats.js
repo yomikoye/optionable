@@ -25,7 +25,9 @@ router.get('/', (req, res) => {
                 COUNT(CASE WHEN status = 'Closed' THEN 1 END) as closedCount,
                 COALESCE(SUM((entryPrice - closePrice) * quantity * 100 - commission), 0) as totalPnL,
                 COALESCE(SUM(entryPrice * quantity * 100), 0) as totalPremium,
-                COALESCE(SUM(CASE WHEN status = 'Open' THEN strike * quantity * 100 ELSE 0 END), 0) as capitalAtRisk,
+                COALESCE(SUM(CASE WHEN status = 'Open' AND type IN ('CSP', 'CC') THEN strike * quantity * 100
+                             WHEN status = 'Open' AND type IN ('CALL', 'PUT') THEN entryPrice * quantity * 100
+                             ELSE 0 END), 0) as capitalAtRisk,
                 COALESCE(SUM(commission), 0) as totalCommissions
             FROM trades
             ${acctWhere}

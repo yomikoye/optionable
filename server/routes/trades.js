@@ -199,8 +199,9 @@ router.post('/import', (req, res) => {
                 }
             }
 
-            // Create positions for CSP Assigned trades, close positions for CC Assigned trades
+            // Create positions for CSP Assigned trades, close positions for CC Assigned trades (wheel only)
             for (const trade of assignedTrades) {
+                if (trade.type !== 'CSP' && trade.type !== 'CC') continue;
                 const shares = trade.quantity * 100;
                 const assignmentDate = trade.closedDate || new Date().toISOString().split('T')[0];
 
@@ -365,8 +366,7 @@ router.post('/', (req, res) => {
         const tickerUpper = ticker.toUpperCase();
         let resolvedParentTradeId = parentTradeId || null;
 
-        // Auto-link CC to assigned CSP: If creating a CC for a ticker with an open position
-        // from a CSP assignment, auto-link the CC to that CSP trade
+        // Auto-link CC to assigned CSP (wheel strategy only)
         if (type === 'CC' && !parentTradeId) {
             const positionQuery = accountId
                 ? `SELECT acquiredFromTradeId FROM positions
@@ -492,8 +492,8 @@ router.put('/:id', (req, res) => {
         const updatedTrade = db.prepare('SELECT * FROM trades WHERE id = ?').get(req.params.id);
         const updatedTradeApi = tradeToApi(updatedTrade);
 
-        // Handle position creation/closing on assignment
-        if (status === 'Assigned' && currentTrade.status !== 'Assigned') {
+        // Handle position creation/closing on assignment (wheel strategy only)
+        if (status === 'Assigned' && currentTrade.status !== 'Assigned' && (type === 'CSP' || type === 'CC')) {
             const tickerUpper = ticker.toUpperCase();
             const shares = (quantity || 1) * 100;
             const assignmentDate = closedDate || new Date().toISOString().split('T')[0];

@@ -8,6 +8,7 @@ export const StockModal = ({ isOpen, onClose, onSave, editingStock, isSelling, a
     useEffect(() => {
         if (isSelling && editingStock) {
             setFormData({
+                sharesToSell: editingStock.shares,
                 soldDate: new Date().toISOString().split('T')[0],
                 salePrice: '',
             });
@@ -38,10 +39,16 @@ export const StockModal = ({ isOpen, onClose, onSave, editingStock, isSelling, a
     const handleSubmit = (e) => {
         e.preventDefault();
         if (isSelling) {
-            onSave({
+            const sharesToSell = Number(formData.sharesToSell);
+            const data = {
                 soldDate: formData.soldDate,
                 salePrice: Number(formData.salePrice),
-            });
+            };
+            // Include sharesToSell so backend knows if partial
+            if (sharesToSell < editingStock.shares) {
+                data.sharesToSell = sharesToSell;
+            }
+            onSave(data);
         } else {
             const { accountId, ...rest } = formData;
             const data = {
@@ -59,6 +66,8 @@ export const StockModal = ({ isOpen, onClose, onSave, editingStock, isSelling, a
     const isValid = !needsAccountPicker || formData.accountId;
 
     const totalCost = (Number(formData.shares) || 0) * (Number(formData.costBasis) || 0);
+    const sharesToSell = Number(formData.sharesToSell) || 0;
+    const isPartialSell = isSelling && editingStock && sharesToSell < editingStock.shares;
 
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm overflow-y-auto">
@@ -89,8 +98,8 @@ export const StockModal = ({ isOpen, onClose, onSave, editingStock, isSelling, a
                                         <p className="font-bold text-red-900 dark:text-red-300">{editingStock?.ticker}</p>
                                     </div>
                                     <div>
-                                        <span className="text-red-600 dark:text-red-400 text-xs uppercase font-semibold">Shares</span>
-                                        <p className="font-bold text-red-900 dark:text-red-300">{editingStock?.shares}</p>
+                                        <span className="text-red-600 dark:text-red-400 text-xs uppercase font-semibold">Available</span>
+                                        <p className="font-bold text-red-900 dark:text-red-300">{editingStock?.shares} shares</p>
                                     </div>
                                     <div>
                                         <span className="text-red-600 dark:text-red-400 text-xs uppercase font-semibold">Cost Basis</span>
@@ -98,7 +107,25 @@ export const StockModal = ({ isOpen, onClose, onSave, editingStock, isSelling, a
                                     </div>
                                 </div>
                             </div>
-                            <div className="grid grid-cols-2 gap-4">
+                            <div className="grid grid-cols-3 gap-4">
+                                <div>
+                                    <label className="block text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase mb-1">Shares to Sell *</label>
+                                    <input
+                                        type="number"
+                                        min="1"
+                                        max={editingStock?.shares || 1}
+                                        step="1"
+                                        value={formData.sharesToSell || ''}
+                                        onChange={(e) => setFormData(prev => ({ ...prev, sharesToSell: e.target.value }))}
+                                        className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-red-500 bg-white dark:bg-slate-700 text-slate-900 dark:text-white"
+                                        required
+                                    />
+                                    {isPartialSell && (
+                                        <p className="text-[10px] text-amber-600 mt-1">
+                                            {editingStock.shares - sharesToSell} shares will remain
+                                        </p>
+                                    )}
+                                </div>
                                 <div>
                                     <label className="block text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase mb-1">Sale Date *</label>
                                     <input
@@ -110,7 +137,7 @@ export const StockModal = ({ isOpen, onClose, onSave, editingStock, isSelling, a
                                     />
                                 </div>
                                 <div>
-                                    <label className="block text-xs font-semibold text-red-500 dark:text-red-400 uppercase mb-1">Sale Price (per share) *</label>
+                                    <label className="block text-xs font-semibold text-red-500 dark:text-red-400 uppercase mb-1">Sale Price *</label>
                                     <div className="relative">
                                         <span className="absolute left-3 top-2 text-slate-400">$</span>
                                         <input
@@ -120,19 +147,23 @@ export const StockModal = ({ isOpen, onClose, onSave, editingStock, isSelling, a
                                             value={formData.salePrice || ''}
                                             onChange={(e) => setFormData(prev => ({ ...prev, salePrice: e.target.value }))}
                                             className="w-full pl-7 pr-3 py-2 border border-red-200 dark:border-red-700 rounded-lg focus:ring-red-500 bg-white dark:bg-slate-700 text-slate-900 dark:text-white"
-                                            placeholder="Price per share"
+                                            placeholder="Per share"
                                             required
                                         />
                                     </div>
-                                    {formData.salePrice && editingStock && (
-                                        <div className="text-xs mt-1 text-right">
-                                            <span className={`font-mono font-medium ${(Number(formData.salePrice) - editingStock.costBasis) >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
-                                                P/L: ${((Number(formData.salePrice) - editingStock.costBasis) * editingStock.shares).toFixed(2)}
-                                            </span>
-                                        </div>
-                                    )}
                                 </div>
                             </div>
+                            {formData.salePrice && editingStock && sharesToSell > 0 && (
+                                <div className="bg-slate-50 dark:bg-slate-700/50 p-3 rounded-lg border border-slate-100 dark:border-slate-600 text-right">
+                                    <span className="text-xs text-slate-400 uppercase mr-2">P/L:</span>
+                                    <span className={`font-mono font-bold ${(Number(formData.salePrice) - editingStock.costBasis) >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                                        ${((Number(formData.salePrice) - editingStock.costBasis) * sharesToSell).toFixed(2)}
+                                    </span>
+                                    <span className="text-xs text-slate-400 ml-2">
+                                        ({sharesToSell} shares x ${(Number(formData.salePrice) - editingStock.costBasis).toFixed(2)})
+                                    </span>
+                                </div>
+                            )}
                         </>
                     ) : (
                         <>
@@ -243,7 +274,10 @@ export const StockModal = ({ isOpen, onClose, onSave, editingStock, isSelling, a
                                     : 'bg-indigo-600 hover:bg-indigo-700 dark:bg-indigo-500 dark:hover:bg-indigo-600'
                             }`}
                         >
-                            {isSelling ? 'Sell Shares' : editingStock ? 'Update Stock' : 'Buy Stock'}
+                            {isSelling
+                                ? (isPartialSell ? `Sell ${sharesToSell} Shares` : 'Sell All Shares')
+                                : editingStock ? 'Update Stock' : 'Buy Stock'
+                            }
                         </button>
                     </div>
                 </form>

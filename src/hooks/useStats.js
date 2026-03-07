@@ -108,7 +108,6 @@ export const useStats = (trades, accountId) => {
             : 0;
 
         const capitalAtRisk = openTrades
-            .filter(t => t.type === 'CSP')
             .reduce((acc, t) => acc + calculateMetrics(t).collateral, 0);
 
         const rolledCount = filteredTrades.filter(t => t.status === 'Rolled').length;

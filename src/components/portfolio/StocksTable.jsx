@@ -163,6 +163,14 @@ export const StocksTable = ({ stocks, onCreate, onUpdate, onDelete, showToast, s
                     <span className="text-xs text-slate-400 font-mono bg-slate-100 dark:bg-slate-700 px-2 py-1 rounded">
                         {aggregated.length} tickers · {filteredStocks.length} lots
                     </span>
+                    <button
+                        onClick={() => { setEditingStock(null); setIsSelling(false); setShowModal(true); }}
+                        className="flex items-center gap-1 px-3 py-1.5 text-sm bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-medium transition-colors"
+                        title="Buy stock"
+                    >
+                        <Plus className="w-4 h-4" />
+                        Buy Stock
+                    </button>
                 </div>
             </div>
 

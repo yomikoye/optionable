@@ -2,9 +2,9 @@
 
 ## Project Overview
 
-Wheel Strategy Tracker for Cash Secured Puts (CSPs) and Covered Calls (CCs) with multi-account support and portfolio management. Self-hosted, local-first app with SQLite storage. Only external dependency is optional live stock prices via [stockprices.dev](https://stockprices.dev).
+Wheel Strategy Tracker for Cash Secured Puts (CSPs) and Covered Calls (CCs) with multi-account support and portfolio management. Self-hosted, local-first app with SQLite storage. Only external dependency is optional live prices via Yahoo Finance.
 
-**Current Version:** 0.14.0
+**Current Version:** 0.15.0
 **Docker:** `yomikoye/optionable:latest`
 
 ---
@@ -100,7 +100,7 @@ All prices stored as INTEGER cents (converted at API boundary).
 - **accounts** — name, commissionPerContract, createdAt, updatedAt
 - **fund_transactions** — accountId, type (deposit/withdrawal/dividend/interest/fee), amount, date, description
 - **stocks** — accountId, ticker, shares, costBasis, acquiredDate, soldDate, salePrice, capitalGainLoss, notes
-- **price_cache** — ticker, price, change, changePercent (cached from stockprices.dev)
+- **price_cache** — ticker, price, change, changePercent (cached from Yahoo Finance)
 - **settings** — key/value store (live_prices_enabled, confirm_expiry, portfolio_mode_enabled)
 - **schema_migrations** — version, applied_at, description (Flyway-style migration tracking)
 

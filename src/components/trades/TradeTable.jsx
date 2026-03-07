@@ -17,6 +17,14 @@ import {
 } from 'lucide-react';
 import { formatDateShort, formatCurrency, formatPercent } from '../../utils/formatters';
 import { calculateDTE, calculateMetrics } from '../../utils/calculations';
+import { isSellSide } from '../../utils/constants';
+
+const TYPE_BADGE_CLASSES = {
+    CSP: 'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-400',
+    CC: 'bg-purple-100 dark:bg-purple-900/40 text-purple-700 dark:text-purple-400',
+    CALL: 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-400',
+    PUT: 'bg-orange-100 dark:bg-orange-900/40 text-orange-700 dark:text-orange-400',
+};
 
 const STATUS_TABS = [
     { key: 'all', label: 'All' },
@@ -46,19 +54,42 @@ export const TradeTable = ({
     const [expandedChains, setExpandedChains] = useState(new Set());
     const [expireConfirm, setExpireConfirm] = useState(null); // trade to confirm expire
     const [prices, setPrices] = useState({});
+    const [optionPrices, setOptionPrices] = useState({});
 
     useEffect(() => {
-        if (!livePricesEnabled) { setPrices({}); return; }
+        if (!livePricesEnabled) { setPrices({}); setOptionPrices({}); return; }
+
+        // Fetch stock prices for all tickers
         const tickers = [...new Set(trades.map(t => t.ticker.toUpperCase()))];
-        if (tickers.length === 0) return;
-        fetch(`${API_URL}/prices/batch`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ tickers })
-        })
-            .then(res => res.json())
-            .then(data => { if (data.success) setPrices(data.data); })
-            .catch(() => {});
+        if (tickers.length > 0) {
+            fetch(`${API_URL}/prices/batch`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ tickers })
+            })
+                .then(res => res.json())
+                .then(data => { if (data.success) setPrices(data.data); })
+                .catch(() => {});
+        }
+
+        // Fetch option prices for all open trades
+        const optionTrades = trades.filter(t => t.status === 'Open');
+        if (optionTrades.length > 0) {
+            const contracts = optionTrades.map(t => ({
+                ticker: t.ticker.toUpperCase(),
+                strike: t.strike,
+                expirationDate: t.expirationDate,
+                type: t.type
+            }));
+            fetch(`${API_URL}/prices/options/batch`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ contracts })
+            })
+                .then(res => res.json())
+                .then(data => { if (data.success) setOptionPrices(data.data); })
+                .catch(() => {});
+        }
     }, [livePricesEnabled, trades]);
 
     const handleExpireClick = (trade) => {
@@ -76,12 +107,24 @@ export const TradeTable = ({
         }
     };
 
+    // Helper to build option price lookup key
+    const getOptionKey = (trade) =>
+        `${trade.ticker.toUpperCase()}:${trade.strike}:${trade.expirationDate}:${trade.type}`;
+
+    // Get live option price for any open trade
+    const getLiveOptionPrice = (trade) => {
+        if (trade.status !== 'Open') return undefined;
+        const key = getOptionKey(trade);
+        return optionPrices[key]?.price;
+    };
+
     // Build chains from trades - group related trades together
     const chainedTrades = useMemo(() => {
         // Pre-compute metrics for all trades once (avoid recalculating in loops)
         const metricsCache = new Map();
         for (const trade of filteredAndSortedTrades) {
-            metricsCache.set(trade.id, calculateMetrics(trade));
+            const livePrice = getLiveOptionPrice(trade);
+            metricsCache.set(trade.id, calculateMetrics(trade, livePrice));
         }
 
         // Build lookup Map: parentTradeId -> child trade (O(1) lookup vs O(n) find)
@@ -193,7 +236,7 @@ export const TradeTable = ({
         }
 
         return chains;
-    }, [filteredAndSortedTrades, sortConfig]);
+    }, [filteredAndSortedTrades, sortConfig, optionPrices]);
 
     // Paginate chains
     const showAll = tradesPerPage === null;
@@ -360,15 +403,34 @@ export const TradeTable = ({
                                                 </div>
                                             </td>
                                             <td className="px-3 py-2 text-center">
-                                                <span className={`px-2 py-0.5 rounded text-xs font-semibold ${rootTrade.type === 'CSP'
-                                                    ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-400'
-                                                    : 'bg-purple-100 dark:bg-purple-900/40 text-purple-700 dark:text-purple-400'
-                                                }`}>
+                                                <span className={`px-2 py-0.5 rounded text-xs font-semibold ${TYPE_BADGE_CLASSES[rootTrade.type] || TYPE_BADGE_CLASSES.CSP}`}>
                                                     {rootTrade.type}
                                                 </span>
                                             </td>
                                             <td className="px-3 py-2 text-center font-mono text-sm text-slate-600 dark:text-slate-300">${rootTrade.strike}</td>
                                             {livePricesEnabled && (() => {
+                                                const isBuyType = rootTrade.type === 'CALL' || rootTrade.type === 'PUT';
+                                                if (rootTrade.status === 'Open') {
+                                                    // Show option contract price for all open trades
+                                                    const optPrice = optionPrices[getOptionKey(rootTrade)]?.price;
+                                                    // Buy-side: green when price >= entry (gaining value)
+                                                    // Sell-side: green when price <= entry (can buy back cheaper)
+                                                    const isProfit = optPrice != null && (isBuyType
+                                                        ? optPrice >= rootTrade.entryPrice
+                                                        : optPrice <= rootTrade.entryPrice);
+                                                    return (
+                                                        <td className={`px-3 py-2 text-center font-mono text-sm font-medium ${
+                                                            optPrice != null
+                                                                ? isProfit
+                                                                    ? 'text-emerald-600 dark:text-emerald-400'
+                                                                    : 'text-red-500 dark:text-red-400'
+                                                                : 'text-slate-400'
+                                                        }`}>
+                                                            {optPrice != null ? `$${optPrice.toFixed(2)}` : '—'}
+                                                        </td>
+                                                    );
+                                                }
+                                                // Closed trades: show stock price
                                                 const price = prices[rootTrade.ticker.toUpperCase()]?.price;
                                                 return (
                                                     <td className={`px-3 py-2 text-center font-mono text-sm font-medium ${
@@ -423,8 +485,9 @@ export const TradeTable = ({
                                             </td>
                                             <td className="px-3 py-2 text-right">
                                                 <div className="flex justify-end gap-1">
-                                                    {/* Open CC button - shown when CSP was assigned and shares still owned (no open CC, and last CC wasn't assigned) */}
-                                                    {rootTrade.type === 'CSP' &&
+                                                    {/* Open CC button - wheel strategy only: shown when CSP was assigned and shares still owned */}
+                                                    {isSellSide(rootTrade.type) &&
+                                                     rootTrade.type === 'CSP' &&
                                                      rootTrade.status === 'Assigned' &&
                                                      chain.finalStatus !== 'Open' &&
                                                      !(chain.trades[chain.trades.length - 1].type === 'CC' && chain.trades[chain.trades.length - 1].status === 'Assigned') &&
@@ -480,7 +543,7 @@ export const TradeTable = ({
 
                                         {/* Child Trade Rows (when expanded) */}
                                         {isExpanded && chain.trades.slice(1).map((trade, idx) => {
-                                            const metrics = calculateMetrics(trade);
+                                            const metrics = calculateMetrics(trade, getLiveOptionPrice(trade));
                                             const dte = calculateDTE(trade.expirationDate, trade.status);
                                             return (
                                                 <tr key={trade.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-700/50 transition-colors">
@@ -492,15 +555,30 @@ export const TradeTable = ({
                                                         </div>
                                                     </td>
                                                     <td className="px-3 py-2 text-center">
-                                                        <span className={`px-2 py-0.5 rounded text-xs font-semibold ${trade.type === 'CSP'
-                                                            ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-400'
-                                                            : 'bg-purple-100 dark:bg-purple-900/40 text-purple-700 dark:text-purple-400'
-                                                        }`}>
+                                                        <span className={`px-2 py-0.5 rounded text-xs font-semibold ${TYPE_BADGE_CLASSES[trade.type] || TYPE_BADGE_CLASSES.CSP}`}>
                                                             {trade.type}
                                                         </span>
                                                     </td>
                                                     <td className="px-3 py-2 text-center font-mono text-sm text-slate-600 dark:text-slate-300">${trade.strike}</td>
                                                     {livePricesEnabled && (() => {
+                                                        const isBuyType = trade.type === 'CALL' || trade.type === 'PUT';
+                                                        if (trade.status === 'Open') {
+                                                            const optPrice = optionPrices[getOptionKey(trade)]?.price;
+                                                            const isProfit = optPrice != null && (isBuyType
+                                                                ? optPrice >= trade.entryPrice
+                                                                : optPrice <= trade.entryPrice);
+                                                            return (
+                                                                <td className={`px-3 py-2 text-center font-mono text-sm font-medium ${
+                                                                    optPrice != null
+                                                                        ? isProfit
+                                                                            ? 'text-emerald-600 dark:text-emerald-400'
+                                                                            : 'text-red-500 dark:text-red-400'
+                                                                        : 'text-slate-400'
+                                                                }`}>
+                                                                    {optPrice != null ? `$${optPrice.toFixed(2)}` : '—'}
+                                                                </td>
+                                                            );
+                                                        }
                                                         const price = prices[trade.ticker.toUpperCase()]?.price;
                                                         return (
                                                             <td className={`px-3 py-2 text-center font-mono text-sm font-medium ${

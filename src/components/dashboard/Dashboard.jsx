@@ -20,9 +20,9 @@ export const Dashboard = ({ stats }) => {
     return (
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
             <KpiCard
-                label="Premium Collected"
+                label="Options P/L"
                 value={formatCurrency(stats.totalPremiumCollected)}
-                valueClassName="text-emerald-600 dark:text-emerald-400"
+                valueClassName={stats.totalPremiumCollected >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}
                 subtext={`${stats.closedTradesCount} closed trades`}
             />
 
