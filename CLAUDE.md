@@ -174,6 +174,13 @@ npm run build        # Build for production
    - Use the CHANGELOG.md entry for the version as the release notes body
    - Include a Docker pull command at the bottom of the notes
    - Only the newest release should have `--latest=true`
+10. **Post-release cleanup:**
+    - Delete the feature branch (local + remote): `git branch -d <branch>` / `git push origin --delete <branch>`
+    - Delete any other merged or stale local branches: `git branch --merged main` to find them
+    - Prune stale remote refs: `git remote prune origin`
+    - Reset `develop` to match `main`: `git checkout develop && git reset --hard main && git push origin develop`
+    - Stop and remove the Docker buildx container: `docker stop buildx_buildkit_multiplatform0 && docker rm buildx_buildkit_multiplatform0`
+    - Verify final state: only `main` and `develop` branches, both on same commit
 
 ---
 
