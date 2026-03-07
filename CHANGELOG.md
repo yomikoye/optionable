@@ -1,5 +1,39 @@
 # Changelog
 
+## v0.15.0
+
+### New Features
+- **Yahoo Finance integration** — Replaced stockprices.dev with `yahoo-finance2` for live stock and option contract prices
+- **CALL and PUT trade types** — Track bought calls and puts alongside CSP/CC wheel trades with correct buy-side P/L calculations
+- **Live option prices** — Fetch real-time option contract prices for all open trades (CSP, CC, CALL, PUT) to show unrealized P/L
+- **Partial stock selling** — Sell any number of shares from a stock lot (e.g., sell 10 of 100 shares) instead of all-or-nothing
+- **Buy Stock button in Stock Positions** — Added duplicate Buy Stock button in the Stock Positions table header for convenience
+
+### Improvements
+- **Trade Modal** — Info icon toggles help panel explaining all 4 trade types; labels adapt for buy-side vs sell-side
+- **Price column** — Shows live option contract price for open trades (green/red based on profit direction per type)
+- **Dashboard** — Renamed "Premium Collected" to "Options P/L" with conditional coloring
+- **Fund Journal** — Improved table padding/margins and added pagination support
+- **Settings** — Renamed "Paginate Trades" to "Enable Pagination" and "Trades per page" to "Items per page"
+- **Settings** — Updated price source label from "stockprices.dev" to "Yahoo Finance"
+
+### Bug Fixes
+- **P/L calculations** — Fixed all SQL queries in stats and portfolio routes to use type-aware formulas for CALL/PUT trades
+- **Roll P/L display** — Fixed TradeModal roll Original P/L and Net Credit/Debit to handle buy-side trades correctly
+- **Price refetch stability** — Replaced unstable `trades` array dependency with memoized string keys to prevent unnecessary API calls
+- **Foreign keys** — Re-enabled foreign keys after migration v14 (were disabled but never turned back on)
+- **Fund Journal pagination** — Reset to page 1 when items-per-page setting changes
+
+### Backend
+- **DB migration v14** — Added CALL/PUT to trades type CHECK constraint
+- **Options batch endpoint** — `POST /api/prices/options/batch` fetches option chains grouped by ticker+expiry
+- **Stats** — Capital at risk calculation handles buy-side (premium paid) vs sell-side (strike × qty × 100)
+- **Partial sell** — Atomic database transaction splits stock lots when selling partial shares
+- **API caching** — 1-hour TTL for stock prices (DB cache) and option prices (in-memory with 100-entry eviction)
+- **Input validation** — Options batch endpoint validates required fields and whitelists trade types
+
+---
+
 ## v0.14.0
 
 ### New Features

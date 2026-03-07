@@ -1,4 +1,4 @@
-export const VALID_TYPES = ['CSP', 'CC'];
+export const VALID_TYPES = ['CSP', 'CC', 'CALL', 'PUT'];
 export const VALID_STATUSES = ['Open', 'Expired', 'Assigned', 'Closed', 'Rolled'];
 
 export const validateTrade = (trade, isUpdate = false) => {

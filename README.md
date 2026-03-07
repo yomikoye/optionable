@@ -2,7 +2,7 @@
 
 A self-hosted wheel strategy tracker for Cash Secured Puts (CSPs) and Covered Calls (CCs) with multi-account support and portfolio management.
 
-![Version](https://img.shields.io/badge/version-0.14.0-blue)
+![Version](https://img.shields.io/badge/version-0.15.0-blue)
 ![Docker](https://img.shields.io/badge/docker-yomikoye%2Foptionable-green)
 ![Platforms](https://img.shields.io/badge/platforms-amd64%20%7C%20arm64-lightgrey)
 
@@ -10,7 +10,7 @@ A self-hosted wheel strategy tracker for Cash Secured Puts (CSPs) and Covered Ca
 
 Optionable is designed to be **fast, fully local, and self-contained**. Everything runs on your own hardware with no accounts to create, no cloud sync, and no brokerage connections required. Your trade data lives in a local SQLite database that you own completely.
 
-The only external dependency is optional live stock prices via [stockprices.dev](https://stockprices.dev), used for unrealized P/L on open positions. This can be disabled in settings, making the app fully offline-capable.
+The only external dependency is optional live prices via Yahoo Finance, used for unrealized P/L on open positions. This can be disabled in settings, making the app fully offline-capable.
 
 ## Features
 
@@ -38,7 +38,7 @@ The only external dependency is optional live stock prices via [stockprices.dev]
 - **Context-Aware UI** - Header button switches between "New Trade" and "Buy Stock" based on active tab
 
 ### General
-- **Live Stock Prices** - Optional real-time prices for unrealized G/L (via [stockprices.dev](https://stockprices.dev), can be disabled)
+- **Live Prices** - Optional real-time stock and option prices for unrealized P/L (via Yahoo Finance, can be disabled)
 - **Auto Calculations** - P/L, ROI, annualized ROI, DTE, collateral
 - **CSV Import/Export** - Multi-section format supporting trades, fund transactions, and stocks (backward compatible with old CSVs)
 - **Dark Mode** - Toggle in Settings
@@ -185,7 +185,7 @@ src/
 ```bash
 # Multi-platform build and push
 docker buildx build --platform linux/amd64,linux/arm64 \
-  -t yomikoye/optionable:0.14.0 \
+  -t yomikoye/optionable:0.15.0 \
   -t yomikoye/optionable:latest \
   --push .
 ```

@@ -23,9 +23,13 @@ router.get('/', (req, res) => {
                 COUNT(CASE WHEN status = 'Assigned' THEN 1 END) as assignedCount,
                 COUNT(CASE WHEN status = 'Rolled' THEN 1 END) as rolledCount,
                 COUNT(CASE WHEN status = 'Closed' THEN 1 END) as closedCount,
-                COALESCE(SUM((entryPrice - closePrice) * quantity * 100 - commission), 0) as totalPnL,
+                COALESCE(SUM(CASE WHEN type IN ('CSP', 'CC') THEN (entryPrice - closePrice) * quantity * 100 - commission
+                             WHEN type IN ('CALL', 'PUT') THEN (closePrice - entryPrice) * quantity * 100 - commission
+                             ELSE 0 END), 0) as totalPnL,
                 COALESCE(SUM(entryPrice * quantity * 100), 0) as totalPremium,
-                COALESCE(SUM(CASE WHEN status = 'Open' THEN strike * quantity * 100 ELSE 0 END), 0) as capitalAtRisk,
+                COALESCE(SUM(CASE WHEN status = 'Open' AND type IN ('CSP', 'CC') THEN strike * quantity * 100
+                             WHEN status = 'Open' AND type IN ('CALL', 'PUT') THEN entryPrice * quantity * 100
+                             ELSE 0 END), 0) as capitalAtRisk,
                 COALESCE(SUM(commission), 0) as totalCommissions
             FROM trades
             ${acctWhere}
@@ -48,7 +52,8 @@ router.get('/', (req, res) => {
                 SELECT
                     id as root_id,
                     id as current_id,
-                    (entryPrice - closePrice) * quantity * 100 - commission as chain_pnl,
+                    CASE WHEN type IN ('CALL', 'PUT') THEN (closePrice - entryPrice) * quantity * 100 - commission
+                         ELSE (entryPrice - closePrice) * quantity * 100 - commission END as chain_pnl,
                     status as final_status
                 FROM trades
                 WHERE parentTradeId IS NULL ${acctAnd}
@@ -59,7 +64,8 @@ router.get('/', (req, res) => {
                 SELECT
                     cw.root_id,
                     t.id as current_id,
-                    cw.chain_pnl + (t.entryPrice - t.closePrice) * t.quantity * 100 - t.commission,
+                    cw.chain_pnl + CASE WHEN t.type IN ('CALL', 'PUT') THEN (t.closePrice - t.entryPrice) * t.quantity * 100 - t.commission
+                                       ELSE (t.entryPrice - t.closePrice) * t.quantity * 100 - t.commission END,
                     t.status as final_status
                 FROM chain_walk cw
                 JOIN trades t ON t.parentTradeId = cw.current_id
@@ -86,7 +92,8 @@ router.get('/', (req, res) => {
         const monthlyStats = db.prepare(`
             SELECT
                 strftime('%Y-%m', COALESCE(closedDate, openedDate)) as month,
-                SUM((entryPrice - closePrice) * quantity * 100 - commission) as pnl
+                SUM(CASE WHEN type IN ('CALL', 'PUT') THEN (closePrice - entryPrice) * quantity * 100 - commission
+                         ELSE (entryPrice - closePrice) * quantity * 100 - commission END) as pnl
             FROM trades
             WHERE status NOT IN ('Open', 'Rolled') ${acctAnd}
             GROUP BY month
@@ -97,7 +104,8 @@ router.get('/', (req, res) => {
         const tickerStats = db.prepare(`
             SELECT
                 ticker,
-                SUM((entryPrice - closePrice) * quantity * 100 - commission) as pnl
+                SUM(CASE WHEN type IN ('CALL', 'PUT') THEN (closePrice - entryPrice) * quantity * 100 - commission
+                         ELSE (entryPrice - closePrice) * quantity * 100 - commission END) as pnl
             FROM trades
             ${acctWhere}
             GROUP BY ticker
@@ -110,8 +118,10 @@ router.get('/', (req, res) => {
         // Average ROI for completed trades
         const avgRoiResult = db.prepare(`
             SELECT AVG(
-                CASE WHEN strike > 0 AND quantity > 0
+                CASE WHEN strike > 0 AND quantity > 0 AND type IN ('CSP', 'CC')
                 THEN ((entryPrice - closePrice) * 100.0 - commission * 1.0 / quantity) / strike
+                WHEN quantity > 0 AND entryPrice > 0 AND type IN ('CALL', 'PUT')
+                THEN ((closePrice - entryPrice) * 100.0 - commission * 1.0 / quantity) / entryPrice
                 ELSE 0 END
             ) as avgRoi
             FROM trades

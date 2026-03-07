@@ -81,7 +81,7 @@ router.post('/', (req, res) => {
     }
 });
 
-// PUT update/sell stock
+// PUT update/sell stock (supports partial sells)
 router.put('/:id', (req, res) => {
     try {
         const current = db.prepare('SELECT * FROM stocks WHERE id = ?').get(req.params.id);
@@ -94,12 +94,55 @@ router.put('/:id', (req, res) => {
             return apiResponse.error(res, 'Validation failed', 400, validationErrors);
         }
 
+        const soldDate = req.body.soldDate !== undefined ? req.body.soldDate : current.soldDate;
+        const salePrice = req.body.salePrice !== undefined ? (req.body.salePrice !== null ? toCents(req.body.salePrice) : null) : current.salePrice;
+        const sharesToSell = req.body.sharesToSell !== undefined ? Number(req.body.sharesToSell) : null;
+
+        // Partial sell: split the lot
+        if (soldDate && salePrice !== null && sharesToSell && sharesToSell < current.shares) {
+            if (sharesToSell < 1 || !Number.isInteger(sharesToSell)) {
+                return apiResponse.error(res, 'sharesToSell must be a positive integer', 400);
+            }
+
+            const costBasisDollars = toDollars(current.costBasis);
+            const salePriceDollars = toDollars(salePrice);
+            const capitalGainLoss = toCents((salePriceDollars - costBasisDollars) * sharesToSell);
+
+            const partialSellTx = db.transaction(() => {
+                // Reduce shares on original lot
+                db.prepare(`
+                    UPDATE stocks SET shares = ?, updatedAt = CURRENT_TIMESTAMP WHERE id = ?
+                `).run(current.shares - sharesToSell, current.id);
+
+                // Create new sold record for the sold portion
+                const result = db.prepare(`
+                    INSERT INTO stocks (accountId, ticker, shares, costBasis, acquiredDate, soldDate, salePrice, capitalGainLoss, notes)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                `).run(
+                    current.accountId,
+                    current.ticker,
+                    sharesToSell,
+                    current.costBasis,
+                    current.acquiredDate,
+                    soldDate,
+                    salePrice,
+                    capitalGainLoss,
+                    current.notes
+                );
+
+                return result.lastInsertRowid;
+            });
+
+            const soldId = partialSellTx();
+            const soldStock = db.prepare('SELECT * FROM stocks WHERE id = ?').get(soldId);
+            return apiResponse.success(res, stockToApi(soldStock));
+        }
+
+        // Full sell or regular update
         const ticker = req.body.ticker ? req.body.ticker.toUpperCase() : current.ticker;
         const shares = req.body.shares !== undefined ? Number(req.body.shares) : current.shares;
         const costBasis = req.body.costBasis !== undefined ? toCents(req.body.costBasis) : current.costBasis;
         const acquiredDate = req.body.acquiredDate ?? current.acquiredDate;
-        const soldDate = req.body.soldDate !== undefined ? req.body.soldDate : current.soldDate;
-        const salePrice = req.body.salePrice !== undefined ? (req.body.salePrice !== null ? toCents(req.body.salePrice) : null) : current.salePrice;
         const notes = req.body.notes !== undefined ? req.body.notes : current.notes;
 
         // Compute capital gain/loss when selling

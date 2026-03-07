@@ -1,6 +1,14 @@
-import React from 'react';
-import { X, RefreshCw } from 'lucide-react';
+import React, { useState } from 'react';
+import { X, RefreshCw, Info } from 'lucide-react';
 import { formatCurrency } from '../../utils/formatters';
+import { isBuySide } from '../../utils/constants';
+
+const TRADE_TYPE_INFO = {
+    CSP: { label: 'CSP (Sell Put)', description: 'Cash Secured Put — Sell a put, collect premium. Obligated to buy shares at strike if assigned.' },
+    CC: { label: 'CC (Sell Call)', description: 'Covered Call — Sell a call on shares you own, collect premium. Obligated to sell at strike if assigned.' },
+    CALL: { label: 'Call (Buy)', description: 'Long Call — Pay premium for the right to buy shares at strike. Profit when stock rises above strike + premium.' },
+    PUT: { label: 'Put (Buy)', description: 'Long Put — Pay premium for the right to sell shares at strike. Profit when stock falls below strike - premium.' },
+};
 
 export const TradeModal = ({
     isModalOpen,
@@ -19,9 +27,12 @@ export const TradeModal = ({
     modalAccountId,
     setModalAccountId
 }) => {
+    const [showTypeHelp, setShowTypeHelp] = useState(false);
+
     if (!isModalOpen) return null;
 
     const needsAccountPicker = !selectedAccountId && !editingId && !isRolling;
+    const isBuy = isBuySide(formData.type);
 
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm overflow-y-auto">
@@ -99,7 +110,12 @@ export const TradeModal = ({
                                     />
                                 </div>
                                 <div className="text-xs text-amber-600 mt-1">
-                                    Original P/L: {formatCurrency((rollFromTrade.entryPrice - (Number(rollClosePrice) || 0)) * rollFromTrade.quantity * 100)}
+                                    Original P/L: {formatCurrency(
+                                        (rollFromTrade.type === 'CALL' || rollFromTrade.type === 'PUT'
+                                            ? ((Number(rollClosePrice) || 0) - rollFromTrade.entryPrice)
+                                            : (rollFromTrade.entryPrice - (Number(rollClosePrice) || 0))
+                                        ) * rollFromTrade.quantity * 100
+                                    )}
                                 </div>
                             </div>
                         </div>
@@ -142,14 +158,24 @@ export const TradeModal = ({
 
                     <div className="grid grid-cols-4 gap-4">
                         <div className="col-span-1">
-                            <label className="block text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase mb-1">Type</label>
+                            <label className="block text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase mb-1 flex items-center gap-1">
+                                Type
+                                <button
+                                    type="button"
+                                    onClick={() => setShowTypeHelp(!showTypeHelp)}
+                                    className="text-slate-400 hover:text-indigo-500 transition-colors"
+                                >
+                                    <Info className="w-3 h-3" />
+                                </button>
+                            </label>
                             <select name="type" value={formData.type} onChange={handleInputChange} className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-900 dark:text-white" disabled={isRolling}>
-                                <option value="CSP">CSP (Put)</option>
-                                <option value="CC">CC (Call)</option>
+                                {Object.entries(TRADE_TYPE_INFO).map(([key, info]) => (
+                                    <option key={key} value={key}>{info.label}</option>
+                                ))}
                             </select>
                         </div>
                         <div className="col-span-1">
-                            <label className="block text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase mb-1">New Strike *</label>
+                            <label className="block text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase mb-1">Strike *</label>
                             <input type="number" step="0.5" name="strike" required value={formData.strike} onChange={handleInputChange} className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-900 dark:text-white" placeholder="0.00" />
                         </div>
                         <div className="col-span-1">
@@ -162,54 +188,97 @@ export const TradeModal = ({
                         </div>
                     </div>
 
+                    {/* Type help tooltip */}
+                    {showTypeHelp && (
+                        <div className="bg-indigo-50 dark:bg-indigo-900/20 border border-indigo-200 dark:border-indigo-800 rounded-lg p-3 space-y-2">
+                            {Object.entries(TRADE_TYPE_INFO).map(([key, info]) => (
+                                <div key={key} className="flex gap-2">
+                                    <span className={`text-xs font-bold min-w-[52px] ${
+                                        key === 'CSP' ? 'text-blue-600' :
+                                        key === 'CC' ? 'text-purple-600' :
+                                        key === 'CALL' ? 'text-emerald-600' :
+                                        'text-orange-600'
+                                    }`}>{key}</span>
+                                    <span className="text-xs text-slate-600 dark:text-slate-300">{info.description}</span>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+
                     <div className="grid grid-cols-2 gap-4 bg-slate-50 dark:bg-slate-700/50 p-4 rounded-lg border border-slate-100 dark:border-slate-600">
                         <div>
-                            <label className="block text-xs font-semibold uppercase mb-1 text-emerald-600 dark:text-emerald-400">
-                                {isRolling ? 'New Premium *' : 'Entry Premium ($)'}
+                            <label className={`block text-xs font-semibold uppercase mb-1 ${
+                                isBuy
+                                    ? 'text-red-500 dark:text-red-400'
+                                    : 'text-emerald-600 dark:text-emerald-400'
+                            }`}>
+                                {isRolling ? 'New Premium *' : isBuy ? 'Premium Paid ($)' : 'Entry Premium ($)'}
                             </label>
                             <div className="relative">
                                 <span className="absolute left-3 top-2 text-slate-400">$</span>
                                 <input
                                     type="number" step="0.01" name="entryPrice" required
                                     value={formData.entryPrice} onChange={handleInputChange}
-                                    className="w-full pl-7 pr-3 py-2 border border-emerald-200 dark:border-emerald-700 rounded-lg focus:ring-emerald-500 bg-white dark:bg-slate-700 text-slate-900 dark:text-white"
+                                    className={`w-full pl-7 pr-3 py-2 border rounded-lg bg-white dark:bg-slate-700 text-slate-900 dark:text-white ${
+                                        isBuy
+                                            ? 'border-red-200 dark:border-red-700 focus:ring-red-500'
+                                            : 'border-emerald-200 dark:border-emerald-700 focus:ring-emerald-500'
+                                    }`}
                                     placeholder="Price per share"
                                 />
                             </div>
                             <div className="text-[10px] text-slate-400 mt-1 text-right">
                                 Total: {formatCurrency((formData.entryPrice || 0) * (formData.quantity || 0) * 100)}
+                                {isBuy && <span className="ml-1">(debit)</span>}
                             </div>
                         </div>
 
                         {!isRolling && (
                             <div>
-                                <label className="block text-xs font-semibold uppercase mb-1 text-red-500 dark:text-red-400">Close Cost ($)</label>
+                                <label className={`block text-xs font-semibold uppercase mb-1 ${
+                                    isBuy
+                                        ? 'text-emerald-600 dark:text-emerald-400'
+                                        : 'text-red-500 dark:text-red-400'
+                                }`}>
+                                    {isBuy ? 'Sell Price ($)' : 'Close Cost ($)'}
+                                </label>
                                 <div className="relative">
                                     <span className="absolute left-3 top-2 text-slate-400">$</span>
                                     <input
                                         type="number" step="0.01" name="closePrice"
                                         value={formData.closePrice} onChange={handleInputChange}
-                                        className="w-full pl-7 pr-3 py-2 border border-red-200 dark:border-red-700 rounded-lg focus:ring-red-500 bg-white dark:bg-slate-700 text-slate-900 dark:text-white"
+                                        className={`w-full pl-7 pr-3 py-2 border rounded-lg bg-white dark:bg-slate-700 text-slate-900 dark:text-white ${
+                                            isBuy
+                                                ? 'border-emerald-200 dark:border-emerald-700 focus:ring-emerald-500'
+                                                : 'border-red-200 dark:border-red-700 focus:ring-red-500'
+                                        }`}
                                         placeholder="0.00 if open"
                                     />
                                 </div>
                             </div>
                         )}
 
-                        {isRolling && (
-                            <div className="flex flex-col justify-center">
-                                <div className="text-xs text-slate-500 dark:text-slate-400 uppercase mb-1">Net Credit/Debit</div>
-                                <div className={`text-xl font-bold ${((Number(formData.entryPrice) || 0) - (Number(rollClosePrice) || 0)) >= 0
-                                    ? 'text-emerald-600 dark:text-emerald-400'
-                                    : 'text-red-600 dark:text-red-400'
+                        {isRolling && (() => {
+                            const isBuy = rollFromTrade && (rollFromTrade.type === 'CALL' || rollFromTrade.type === 'PUT');
+                            const netPerShare = isBuy
+                                ? (Number(rollClosePrice) || 0) - (Number(formData.entryPrice) || 0)
+                                : (Number(formData.entryPrice) || 0) - (Number(rollClosePrice) || 0);
+                            const netTotal = netPerShare * (formData.quantity || 1) * 100;
+                            return (
+                                <div className="flex flex-col justify-center">
+                                    <div className="text-xs text-slate-500 dark:text-slate-400 uppercase mb-1">Net Credit/Debit</div>
+                                    <div className={`text-xl font-bold ${netPerShare >= 0
+                                        ? 'text-emerald-600 dark:text-emerald-400'
+                                        : 'text-red-600 dark:text-red-400'
                                     }`}>
-                                    {formatCurrency(((Number(formData.entryPrice) || 0) - (Number(rollClosePrice) || 0)) * (formData.quantity || 1) * 100)}
+                                        {formatCurrency(netTotal)}
+                                    </div>
+                                    <div className="text-[10px] text-slate-400">
+                                        {netPerShare >= 0 ? 'Credit' : 'Debit'}
+                                    </div>
                                 </div>
-                                <div className="text-[10px] text-slate-400">
-                                    {((Number(formData.entryPrice) || 0) - (Number(rollClosePrice) || 0)) >= 0 ? 'Credit' : 'Debit'}
-                                </div>
-                            </div>
-                        )}
+                            );
+                        })()}
                     </div>
 
                     {/* Commission */}

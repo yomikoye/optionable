@@ -185,7 +185,7 @@ export const SettingsModal = ({ onClose, showToast, accounts, onCreateAccount, o
                             <div>
                                 <p className="font-medium text-slate-900 dark:text-white">Live Stock Prices</p>
                                 <p className="text-sm text-slate-500 dark:text-slate-400">
-                                    Fetch prices from stockprices.dev
+                                    Fetch prices from Yahoo Finance
                                 </p>
                             </div>
                         </div>
@@ -243,9 +243,9 @@ export const SettingsModal = ({ onClose, showToast, accounts, onCreateAccount, o
                             <div className="flex items-center gap-3">
                                 <List className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
                                 <div>
-                                    <p className="font-medium text-slate-900 dark:text-white">Paginate Trades</p>
+                                    <p className="font-medium text-slate-900 dark:text-white">Enable Pagination</p>
                                     <p className="text-sm text-slate-500 dark:text-slate-400">
-                                        Split trade log into pages
+                                        Split tables into pages
                                     </p>
                                 </div>
                             </div>
@@ -268,7 +268,7 @@ export const SettingsModal = ({ onClose, showToast, accounts, onCreateAccount, o
                         {paginationEnabled && (
                             <div className="px-4 pb-4 pt-0">
                                 <div className="flex items-center gap-3 pl-8">
-                                    <label className="text-sm text-slate-600 dark:text-slate-300 whitespace-nowrap">Trades per page</label>
+                                    <label className="text-sm text-slate-600 dark:text-slate-300 whitespace-nowrap">Items per page</label>
                                     <input
                                         type="number"
                                         min="1"

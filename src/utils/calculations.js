@@ -22,18 +22,31 @@ export const calculateDaysHeld = (trade) => {
 };
 
 // Calculate trade metrics (P/L, ROI, etc.)
-export const calculateMetrics = (trade) => {
+// liveOptionPrice: optional live price for open CALL/PUT trades (unrealized P/L)
+export const calculateMetrics = (trade, liveOptionPrice) => {
     const quantity = parseFloat(trade.quantity) || 0;
     const strike = parseFloat(trade.strike) || 0;
     const entryPrice = parseFloat(trade.entryPrice) || 0;
-    const closePrice = parseFloat(trade.closePrice) || 0;
-
     const commission = parseFloat(trade.commission) || 0;
-    const totalPremium = entryPrice * quantity * 100;
-    const totalCloseCost = closePrice * quantity * 100;
-    const pnl = totalPremium - totalCloseCost - commission;
+    const isBuy = trade.type === 'CALL' || trade.type === 'PUT';
 
-    const collateral = strike * quantity * 100;
+    // For any open trade with a live option price, use it as current value for unrealized P/L
+    const effectiveClosePrice = (trade.status === 'Open' && liveOptionPrice != null)
+        ? liveOptionPrice
+        : (parseFloat(trade.closePrice) || 0);
+
+    const totalPremium = entryPrice * quantity * 100;
+    const totalCloseCost = effectiveClosePrice * quantity * 100;
+
+    // Sell-side (CSP/CC): P/L = premium collected - close cost - commission
+    // Buy-side (CALL/PUT): P/L = close proceeds - premium paid - commission
+    const pnl = isBuy
+        ? totalCloseCost - totalPremium - commission
+        : totalPremium - totalCloseCost - commission;
+
+    // Sell-side collateral = strike * qty * 100 (cash secured)
+    // Buy-side cost = premium paid (max loss)
+    const collateral = isBuy ? totalPremium : strike * quantity * 100;
     const roi = collateral > 0 ? (pnl / collateral) * 100 : 0;
 
     const daysHeld = calculateDaysHeld(trade);

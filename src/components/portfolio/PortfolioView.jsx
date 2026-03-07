@@ -20,7 +20,8 @@ export const PortfolioView = ({
     showToast,
     selectedAccountId,
     accounts,
-    buyStockTrigger
+    buyStockTrigger,
+    itemsPerPage
 }) => {
     return (
         <div className="space-y-6">
@@ -37,6 +38,7 @@ export const PortfolioView = ({
                 showToast={showToast}
                 selectedAccountId={selectedAccountId}
                 accounts={accounts}
+                itemsPerPage={itemsPerPage}
             />
             <StocksTable
                 stocks={stocks}
