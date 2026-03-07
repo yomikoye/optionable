@@ -439,6 +439,7 @@ const migrations = [
                 CREATE INDEX idx_trades_accountId ON trades(accountId);
             `);
             db.prepare('INSERT INTO settings (key, value) VALUES (?, ?)').run('call_put_migration_v1', 'true');
+            db.pragma('foreign_keys = ON');
         }
     }
 ];

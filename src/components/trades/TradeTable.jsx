@@ -17,7 +17,6 @@ import {
 } from 'lucide-react';
 import { formatDateShort, formatCurrency, formatPercent } from '../../utils/formatters';
 import { calculateDTE, calculateMetrics } from '../../utils/calculations';
-import { isSellSide } from '../../utils/constants';
 
 const TYPE_BADGE_CLASSES = {
     CSP: 'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-400',
@@ -56,11 +55,18 @@ export const TradeTable = ({
     const [prices, setPrices] = useState({});
     const [optionPrices, setOptionPrices] = useState({});
 
+    // Stable keys for price fetch dependencies (avoid refetching on every render)
+    const tickerKey = useMemo(() => [...new Set(trades.map(t => t.ticker.toUpperCase()))].sort().join(','), [trades]);
+    const openTradeKey = useMemo(() => trades
+        .filter(t => t.status === 'Open')
+        .map(t => `${t.id}:${t.ticker}:${t.strike}:${t.expirationDate}:${t.type}`)
+        .sort().join(','), [trades]);
+
     useEffect(() => {
         if (!livePricesEnabled) { setPrices({}); setOptionPrices({}); return; }
 
         // Fetch stock prices for all tickers
-        const tickers = [...new Set(trades.map(t => t.ticker.toUpperCase()))];
+        const tickers = tickerKey ? tickerKey.split(',') : [];
         if (tickers.length > 0) {
             fetch(`${API_URL}/prices/batch`, {
                 method: 'POST',
@@ -90,7 +96,7 @@ export const TradeTable = ({
                 .then(data => { if (data.success) setOptionPrices(data.data); })
                 .catch(() => {});
         }
-    }, [livePricesEnabled, trades]);
+    }, [livePricesEnabled, tickerKey, openTradeKey]);
 
     const handleExpireClick = (trade) => {
         if (confirmExpireEnabled) {
@@ -120,11 +126,17 @@ export const TradeTable = ({
 
     // Build chains from trades - group related trades together
     const chainedTrades = useMemo(() => {
+        // Local helper to avoid closure dep issues
+        const getOptionPrice = (trade) => {
+            if (trade.status !== 'Open') return undefined;
+            const key = `${trade.ticker.toUpperCase()}:${trade.strike}:${trade.expirationDate}:${trade.type}`;
+            return optionPrices[key]?.price;
+        };
+
         // Pre-compute metrics for all trades once (avoid recalculating in loops)
         const metricsCache = new Map();
         for (const trade of filteredAndSortedTrades) {
-            const livePrice = getLiveOptionPrice(trade);
-            metricsCache.set(trade.id, calculateMetrics(trade, livePrice));
+            metricsCache.set(trade.id, calculateMetrics(trade, getOptionPrice(trade)));
         }
 
         // Build lookup Map: parentTradeId -> child trade (O(1) lookup vs O(n) find)
@@ -486,8 +498,7 @@ export const TradeTable = ({
                                             <td className="px-3 py-2 text-right">
                                                 <div className="flex justify-end gap-1">
                                                     {/* Open CC button - wheel strategy only: shown when CSP was assigned and shares still owned */}
-                                                    {isSellSide(rootTrade.type) &&
-                                                     rootTrade.type === 'CSP' &&
+                                                    {rootTrade.type === 'CSP' &&
                                                      rootTrade.status === 'Assigned' &&
                                                      chain.finalStatus !== 'Open' &&
                                                      !(chain.trades[chain.trades.length - 1].type === 'CC' && chain.trades[chain.trades.length - 1].status === 'Assigned') &&

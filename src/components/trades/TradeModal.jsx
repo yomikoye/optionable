@@ -110,7 +110,12 @@ export const TradeModal = ({
                                     />
                                 </div>
                                 <div className="text-xs text-amber-600 mt-1">
-                                    Original P/L: {formatCurrency((rollFromTrade.entryPrice - (Number(rollClosePrice) || 0)) * rollFromTrade.quantity * 100)}
+                                    Original P/L: {formatCurrency(
+                                        (rollFromTrade.type === 'CALL' || rollFromTrade.type === 'PUT'
+                                            ? ((Number(rollClosePrice) || 0) - rollFromTrade.entryPrice)
+                                            : (rollFromTrade.entryPrice - (Number(rollClosePrice) || 0))
+                                        ) * rollFromTrade.quantity * 100
+                                    )}
                                 </div>
                             </div>
                         </div>
@@ -253,20 +258,27 @@ export const TradeModal = ({
                             </div>
                         )}
 
-                        {isRolling && (
-                            <div className="flex flex-col justify-center">
-                                <div className="text-xs text-slate-500 dark:text-slate-400 uppercase mb-1">Net Credit/Debit</div>
-                                <div className={`text-xl font-bold ${((Number(formData.entryPrice) || 0) - (Number(rollClosePrice) || 0)) >= 0
-                                    ? 'text-emerald-600 dark:text-emerald-400'
-                                    : 'text-red-600 dark:text-red-400'
+                        {isRolling && (() => {
+                            const isBuy = rollFromTrade && (rollFromTrade.type === 'CALL' || rollFromTrade.type === 'PUT');
+                            const netPerShare = isBuy
+                                ? (Number(rollClosePrice) || 0) - (Number(formData.entryPrice) || 0)
+                                : (Number(formData.entryPrice) || 0) - (Number(rollClosePrice) || 0);
+                            const netTotal = netPerShare * (formData.quantity || 1) * 100;
+                            return (
+                                <div className="flex flex-col justify-center">
+                                    <div className="text-xs text-slate-500 dark:text-slate-400 uppercase mb-1">Net Credit/Debit</div>
+                                    <div className={`text-xl font-bold ${netPerShare >= 0
+                                        ? 'text-emerald-600 dark:text-emerald-400'
+                                        : 'text-red-600 dark:text-red-400'
                                     }`}>
-                                    {formatCurrency(((Number(formData.entryPrice) || 0) - (Number(rollClosePrice) || 0)) * (formData.quantity || 1) * 100)}
+                                        {formatCurrency(netTotal)}
+                                    </div>
+                                    <div className="text-[10px] text-slate-400">
+                                        {netPerShare >= 0 ? 'Credit' : 'Debit'}
+                                    </div>
                                 </div>
-                                <div className="text-[10px] text-slate-400">
-                                    {((Number(formData.entryPrice) || 0) - (Number(rollClosePrice) || 0)) >= 0 ? 'Credit' : 'Debit'}
-                                </div>
-                            </div>
-                        )}
+                            );
+                        })()}
                     </div>
 
                     {/* Commission */}

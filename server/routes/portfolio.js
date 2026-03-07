@@ -36,7 +36,8 @@ router.get('/stats', (req, res) => {
 
         // Options P/L from trades — only realized (exclude Open trades where closePrice is 0)
         const optionsResult = db.prepare(`
-            SELECT COALESCE(SUM((entryPrice - closePrice) * quantity * 100 - commission), 0) as totalPnL
+            SELECT COALESCE(SUM(CASE WHEN type IN ('CALL', 'PUT') THEN (closePrice - entryPrice) * quantity * 100 - commission
+                                     ELSE (entryPrice - closePrice) * quantity * 100 - commission END), 0) as totalPnL
             FROM trades
             WHERE status != 'Open' ${acctAnd}
         `).get(...acctParams);
@@ -116,7 +117,8 @@ router.get('/monthly', (req, res) => {
         const monthlyOptions = db.prepare(`
             SELECT
                 strftime('%Y-%m', COALESCE(closedDate, openedDate)) as month,
-                SUM((entryPrice - closePrice) * quantity * 100 - commission) as pnl
+                SUM(CASE WHEN type IN ('CALL', 'PUT') THEN (closePrice - entryPrice) * quantity * 100 - commission
+                         ELSE (entryPrice - closePrice) * quantity * 100 - commission END) as pnl
             FROM trades
             WHERE status != 'Open' ${acctAnd}
             GROUP BY month

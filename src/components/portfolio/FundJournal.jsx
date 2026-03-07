@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Plus, Pencil, Trash2, ChevronLeft, ChevronRight } from 'lucide-react';
 import { FundTransactionModal } from './FundTransactionModal';
 
@@ -21,6 +21,9 @@ export const FundJournal = ({ transactions, onCreate, onUpdate, onDelete, showTo
     const [showModal, setShowModal] = useState(false);
     const [editingTransaction, setEditingTransaction] = useState(null);
     const [currentPage, setCurrentPage] = useState(1);
+
+    // Reset to page 1 when items per page changes
+    useEffect(() => { setCurrentPage(1); }, [itemsPerPage]);
 
     const handleSave = async (data) => {
         try {
