@@ -1,3 +1,5 @@
+
+
 # Optionable
 
 A self-hosted wheel strategy tracker for Cash Secured Puts (CSPs) and Covered Calls (CCs) with multi-account support and portfolio management.
@@ -63,7 +65,7 @@ npm run dev
 
 ```bash
 # Pull and run
-docker run -d -p 8080:8080 -v optionable-data:/data yomikoye/optionable:latest
+docker run -d -p 8080:8080 -e DATA_DIR=/data -v optionable-data:/data yomikoye/optionable:latest
 
 # Or with docker-compose
 docker compose up -d
